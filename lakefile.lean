@@ -10,3 +10,6 @@ lean_lib «TensorLib» where
 @[default_target]
 lean_exe "tensorlib" where
   root := `Main
+
+require mathlib from git
+  "https://github.com/leanprover-community/mathlib4"
