@@ -1,6 +1,7 @@
 import Init.System.IO
 import Init.System.FilePath
 import Mathlib.Tactic
+import TensorLib.NonEmptyList
 import TensorLib.TensorElement
 
 /-
@@ -58,16 +59,28 @@ def NumpyBool.fromString (s: String): Except String Bool := match s with
 | "False" => .ok false
 | _ => .error s!"Can't parse {s} as Bool"
 
-abbrev Shape := List Nat
+abbrev Shape := NonEmptyList Nat
+abbrev Strides := NonEmptyList Nat
 
 namespace Shape
 
-def count (s: Shape): Nat := match s with
-| [] => 0
-| [x] => x
-| x :: xs => x * count xs
+def count (s : Shape) : Nat := match s with
+| .mk x xs => x * xs.foldl (fun x y => x * y) 1
 
--- def parse (s: String)
+def defaultStrides (dtype : NumpyDtype) (s : Shape) : Strides :=
+  let s := s.reverse
+  let bytes := dtype.bytes
+  let rec loop (xs : List ℕ) (lastShape lastDimSize : ℕ): List ℕ := match xs with
+  | [] => []
+  | d :: ds =>
+    let rest := loop ds (lastShape * lastDimSize) d
+    lastShape * lastDimSize :: rest
+  let res := NonEmptyList.mk dtype.bytes (loop s.tl bytes s.hd)
+  res.reverse
+
+#eval defaultStrides NumpyDtype.uint32 { hd := 2, tl := [] }
+#eval defaultStrides NumpyDtype.uint32 { hd := 2, tl := [3] }
+#eval defaultStrides NumpyDtype.uint32 { hd := 2, tl := [3, 5, 7] }
 
 end Shape
 
@@ -100,15 +113,122 @@ instance ByteArrayRepr : Repr ByteArray where
 structure NumpyRepr where
   header : NumpyHeader
   data : ByteArray
-  startIndex : Nat -- Pointer to the first byte of ndarray data
+  startIndex : Nat -- Pointer to the first byte of ndarray data, called `offset` in numpy
   endIndex : Nat   -- Pointer to the byte after the last byte of ndarray data
   -- invariant: startIndex <= endIndex
   -- invariant: endIndex - startIndex = descr.bytes * shape.count
   -- invariant: header.endIndex <= |data|
   -- invariant: header.dataSize <= |data|
+  strides : Strides
   deriving Repr
 
 namespace NumpyRepr
+
+def shape (x : NumpyRepr) : Shape := x.header.shape
+
+def ndim (x : NumpyRepr) : ℕ := x.shape.length
+
+def size (x : NumpyRepr) : ℕ := x.shape.count
+
+def itemsize (x : NumpyRepr) : ℕ := x.header.descr.bytes
+
+def nbytes (x : NumpyRepr) : ℕ := x.itemsize * x.size
+
+section Shape
+
+def M a := Except String a
+variable [Monad M]
+
+def reshape (x : NumpyRepr) (shape : Shape) : M NumpyRepr := do
+  if x.shape.count == shape.count then
+    return { x with header.shape := shape }
+  else
+    .error "Reshaping must have the same number of implied elements"
+
+end Shape
+
+def replicateAux {α : Type} (n : Nat) (x : α) (acc : List α) : List α := match n with
+| 0 => acc
+| n + 1 => replicateAux n x (x :: acc)
+
+theorem replicateAuxLength (n : Nat) (x : α) (acc : List α): (replicateAux n x acc).length = n + acc.length := by
+  revert acc
+  induction n
+  . unfold replicateAux
+    simp
+  . unfold replicateAux
+    intros acc
+    rename_i n H
+    rw [H (x :: acc)]
+    simp
+    linarith
+
+def replicate {α : Type} (n : Nat) (x : α) : List α :=
+  replicateAux n x []
+
+theorem replicateLength (n : Nat) (x : α) : (replicate n x).length = n := by
+  exact (replicateAuxLength n x [])
+
+structure Broadcast where
+  left : Shape
+  right : Shape
+  deriving BEq, Repr
+
+section Broadcast
+
+-- In broadcasting, we first extend the shorter array by prefixing 1s.
+-- NKI semantics currently suffixes 1s in some cases, so be explicit about
+-- the naming
+def oneExtendPrefix (b : Broadcast) : Broadcast :=
+  let n1 := b.left.length
+  let n2 := b.right.length
+  if n1 <= n2
+  then { b with left := replicate (n2 - n1) 1 ++ b.left }
+  else { b with right := replicate (n1 - n2) 1 ++ b.right }
+
+theorem oneExtendPrefixLength (b : Broadcast) :
+  let b' := oneExtendPrefix b
+  b'.left.length = b'.right.length := by
+  cases b
+  rename_i left right
+  unfold oneExtendPrefix
+  simp
+  by_cases H : left.length <= right.length
+  . simp [H]
+    rw [NonEmptyList.hAppendListLLength, replicateLength, Nat.sub_add_cancel]
+    exact H
+  . simp [H]
+    rw [NonEmptyList.hAppendListLLength, replicateLength, Nat.sub_add_cancel]
+    linarith
+
+def matchPairs (b : Broadcast) : Option Shape :=
+  if b.left.length != b.right.length then none else
+  let f xy := match xy with
+    | (x, y) =>
+      if x == y then some x
+      else if x == 1 then some y
+      else if y == 1 then some x
+      else none
+  traverse f (NonEmptyList.zip b.left b.right)
+
+def broadcast (b : Broadcast) : Option Shape := matchPairs (oneExtendPrefix b)
+
+def canBroadcast (b : Broadcast) : Bool := (broadcast b).isSome
+
+#eval matchPairs (Broadcast.mk { hd := 1, tl := [2, 3] } { hd := 7, tl := [2, 1] })
+#eval broadcast (Broadcast.mk { hd := 1, tl := [2, 3] } { hd := 7, tl := [7, 9, 2, 1] })
+
+-- todo: add plausible properties when property-based testing settles down in Lean-land
+#guard
+ let x1 := NonEmptyList.fromList! [1,2,3]
+ let x2 := NonEmptyList.fromList! [2,3]
+ let b1 := Broadcast.mk x1 x1
+ let b2 := Broadcast.mk x1 x2
+ oneExtendPrefix b1 == b1 &&
+ broadcast b2 == broadcast b1 &&
+ broadcast b2 == some (NonEmptyList.mk 1 [2, 3])
+
+end Broadcast
 
 namespace Parse
 
@@ -122,7 +242,17 @@ structure ParsingState where
   debug : List String
   deriving Repr
 
-abbrev PState (T : Type) := StateT ParsingState (Except String) T
+abbrev PState (T : Type) := EStateM String ParsingState T
+
+instance : MonadLiftT (Except String) PState where
+  monadLift x := match x with
+  | .ok x => .ok x
+  | .error x => .error x
+
+-- Except is nicer sometimes
+def resultExcept {σ : Type} (x : EStateM.Result String σ a) : Except String a := match x with
+| .ok x _ => .ok x
+| .error x _ => .error x
 
 variable {T : Type}
 
@@ -145,8 +275,8 @@ def whitespace : PState Unit := do
 
 def tryParse (p : PState T) : PState (Option T) := fun s =>
   match p s with
-  | .error _ => .ok (none, s)
-  | .ok (x, s) => .ok (some x, s)
+  | .error _ s => .ok none s
+  | .ok x s => .ok (some x) s
 
 def ignore (p : PState T) : PState Unit := do
   let _ <- tryParse p
@@ -203,9 +333,9 @@ def parseCommaList {T : Type} (start : Char) (end_ : Char) (p : PState T) : PSta
   consume end_
   return xs
 
-def parseShape : PState Shape := do
+partial def parseShape : PState Shape := do
   let xs <- parseCommaList '(' ')' parseToken
-  return xs.map (fun x => x.toNat!)
+  return NonEmptyList.fromList! (xs.map (fun x => x.toNat!))
 
 -- major/minor/header-length
 def parseHeader : PState (Nat × Nat) := do
@@ -237,7 +367,7 @@ def parseOneMetadata : PState Unit := do
     modify (fun s => { s with descr := some d })
   else if id == "fortran_order" then
     let v <- parseToken
-    let b <- NumpyBool.fromString v
+    let b <- liftM (NumpyBool.fromString v)
     modify (fun s => { s with fortranOrder := b })
   else if id == "shape" then
     let shape <- parseShape
@@ -263,12 +393,14 @@ def parseNumpyRepr : PState NumpyRepr := do
   match s.descr, s.fortranOrder, s.shape with
   | some descr, some fortranOrder, some shape =>
     let numpyHeader := NumpyHeader.mk major minor descr fortranOrder shape
-    let repr := NumpyRepr.mk numpyHeader s.source s.headerEnd s.source.size
+    let strides := shape.defaultStrides descr
+    let repr := NumpyRepr.mk numpyHeader s.source s.headerEnd s.source.size strides
     return repr
   | _, _, _ => .error "Can't parse a metadata value"
 
 def parse (buffer : ByteArray) : Except String NumpyRepr := do
-  parseNumpyRepr.eval <| ParsingState.mk buffer 0 0 none none none []
+  let init := ParsingState.mk buffer 0 0 none none none []
+  resultExcept $ parseNumpyRepr.run init
 
 def parseFile (path: System.FilePath) : IO (Except String NumpyRepr) := do
   let buffer <- IO.FS.readBinFile path
