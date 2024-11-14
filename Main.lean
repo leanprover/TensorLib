@@ -15,13 +15,23 @@ def parseNpy (p: Parsed) : IO UInt32 := do
   IO.println s!"Parsing {file}..."
   let v <- NumpyRepr.Parse.parseFile file
   match v with
-  | .error msg => IO.println s!"Couldn't parse {file}: {msg}"
-  | .ok r => IO.println (repr r)
-  return 0
+  | .error msg =>
+    IO.println s!"Couldn't parse {file}: {msg}"
+    return 1
+  | .ok r => do
+    IO.println (repr r)
+    if p.hasFlag "write" then do
+      let new := (System.FilePath.mk file).addExtension "new"
+      IO.println s!"Writing copy to {new}"
+      let _ <- NumpyRepr.save! r new
+    return 0
 
 def parseNpyCmd := `[Cli|
   "parse-npy" VIA parseNpy;
   "Parse a .npy file and pretty print the contents"
+
+  FLAGS:
+    write; "Also write the result back to `input`.new to test tensor saving"
 
   ARGS:
     input : String;      ".npy file to parse"
@@ -36,4 +46,8 @@ def tensorlibCmd : Cmd := `[Cli|
 ]
 
 def main (args : List String) : IO UInt32 :=
-  tensorlibCmd.validate args
+  if args.isEmpty then do
+    IO.println tensorlibCmd.help
+    return 0
+  else
+    tensorlibCmd.validate args

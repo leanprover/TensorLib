@@ -49,7 +49,7 @@ byte order: https://numpy.org/doc/2.1/reference/generated/numpy.dtype.byteorder.
 '<' is little endian, '|' is "not applicable" Not sure why bool showed up
 as both.
 -/
-def fromString (s: String) : Except String NumpyDtype := match s with
+def fromString (s : String) : Except String NumpyDtype := match s with
 | "<b1" | "|b1"=> .ok bool
 | "|i1" => .ok int8
 | "<i2" => .ok int16
@@ -63,6 +63,20 @@ def fromString (s: String) : Except String NumpyDtype := match s with
 | "<f4" => .ok float32
 | "<f8" => .ok float64
 | _ => .error s!"Can't parse {s} as a dtype"
+
+def toString (t : NumpyDtype) : String := match t with
+| bool => "b1"
+| int8 => "i1"
+| int16 => "i2"
+| int32 => "i4"
+| int64 => "i8"
+| uint8 => "u1"
+| uint16 => "u2"
+| uint32 => "u3"
+| uint64 => "u4"
+| float16 => "f2"
+| float32 => "f4"
+| float64 => "f8"
 
 end NumpyDtype
 
@@ -160,8 +174,8 @@ https://numpy.org/doc/stable/reference/generated/numpy.lib.format.html#format-ve
 -/
 structure NumpyHeader where
   -- Version is major.minor
-  major : Nat
-  minor : Nat
+  major : UInt8
+  minor : UInt8
   -- Nat is definitely not the final representation. We need
   -- some function from python type descriptor and element to the appropriate
   -- Lean type.
@@ -334,7 +348,6 @@ def canBroadcast (b : Broadcast) : Bool := (broadcast b).isSome
 
 end Broadcast
 
-
 --! Parse a .npy file
 namespace Parse
 
@@ -432,7 +445,6 @@ partial def parseCommaListAux (p : PState T) (acc : List T) : PState (List T) :=
     ignore comma
     parseCommaListAux p (x :: acc)
 
--- We need to parse both () for shapes and {} for the outer metadata record
 def parseCommaList {T : Type} (start : Char) (end_ : Char) (p : PState T) : PState (List T) := do
   consume start
   let xs <- parseCommaListAux p []
@@ -444,7 +456,7 @@ partial def parseShape : PState Shape := do
   return .fromList! (xs.map (fun x => x.toNat!))
 
 -- major/minor/header-length
-def parseHeader : PState (Nat × Nat) := do
+def parseHeader : PState (UInt8 × UInt8) := do
   let s <- get
   let b := s.source
   if s.index != 0 then .error "Illegal start index"
@@ -455,8 +467,8 @@ def parseHeader : PState (Nat × Nat) := do
   if b[3]! != 'M'.toUInt8 then .error "Invalid fourth byte"
   if b[4]! != 'P'.toUInt8 then .error "Invalid fifth byte"
   if b[5]! != 'Y'.toUInt8 then .error "Invalid sixth byte"
-  let major := b[6]!.toNat
-  let minor := b[7]!.toNat
+  let major := b[6]!
+  let minor := b[7]!
   -- Header length is 2 bytes, little-endian
   let headerLength := b[8]!.toNat + b[9]!.toNat * 256
   set { s with index := 10, headerEnd := 10 + headerLength }
@@ -513,6 +525,58 @@ def parseFile (path: System.FilePath) : IO (Except String NumpyRepr) := do
   return parse buffer
 
 end Parse
+
+section Save
+
+private def pushList (a : ByteArray) (xs : List UInt8) : ByteArray := xs.foldl (fun a b => a.push b) a
+
+private def pushChars (a : ByteArray) (xs : List Char) : ByteArray := xs.foldl (fun a b => a.push (b.toUInt8)) a
+
+private def pushString (a : ByteArray) (xs : String) : ByteArray := pushChars a xs.toList
+
+private def pushStrings (a : ByteArray) (xs : List String) : ByteArray := xs.foldl pushString a
+
+private def boolString (b : Bool) : String := if b then "True" else "False"
+
+private def headerSizeToBytes (n : Nat) : UInt8 × UInt8 :=
+  let v := n.toUInt16
+  (v.toUInt8, (v >>> 8).toUInt8)
+
+private def next64 (n : Nat) : Nat := 64 - (n % 64)
+
+-- Can we do this with local mutation?
+-- TODO: write the correct endian-annotation character. Currently assuming little-endian with '<'
+private def toByteArray! (repr : NumpyRepr) : ByteArray :=
+  let a := ByteArray.empty.push 0x93
+  let a := pushString a "NUMPY"
+  let a := pushList a [repr.header.major, repr.header.minor]
+  let a := (a.push 0).push 0 -- index 8, 9. We will clobber this with the header size in a moment
+  if a.size != 10 then panic s!"Bad header size: {a.size}, should be 9" else
+  let a := pushStrings a [
+    "{'descr': '<",
+    repr.header.descr.toString,
+    "', 'fortran_order': ",
+    boolString repr.header.fortranOrder,
+    ", 'shape': (",
+  ]
+  let a := pushString a (toString repr.header.shape.hd)
+  let a := repr.header.shape.tl.foldl (fun a d => pushString (pushString a ", ") (toString d)) a
+  let a := pushString a "), }"
+  -- We need the header to be aligned
+  let padding := 64 - (a.size % 64) - 1 -- -1 for the terminal '\n'
+  let a := pushList a (List.replicate padding 0x20)
+  let a := a.push 0x0a -- '\n'
+    -- header size is little-endian
+  let (low, hi) := headerSizeToBytes (a.size - 10)
+  let a := a.set! 8 low
+  let a := a.set! 9 hi
+  let data' := repr.data.copySlice repr.startIndex ByteArray.empty 0 repr.nbytes
+  a.append data'
+
+end Save
+
+def save! (repr : NumpyRepr) (file : System.FilePath) : IO Unit :=
+  IO.FS.writeBinFile file repr.toByteArray!
 
 end NumpyRepr
 end TensorLib
