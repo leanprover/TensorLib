@@ -3,14 +3,15 @@ Copyright (c) 2024 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Jean-Baptiste Tristan, Paul Govereau, Sean McLaughlin
 -/
+import Cli
+import Init.System.IO
 import TensorLib
 import TensorLib.NumpyRepr
-import Cli
 
 open Cli
 open TensorLib
 
-def parseNpy (p: Parsed) : IO UInt32 := do
+def parseNpy (p : Parsed) : IO UInt32 := do
   let file := p.positionalArg! "input" |>.as! String
   IO.println s!"Parsing {file}..."
   let v <- NumpyRepr.Parse.parseFile file
@@ -37,12 +38,26 @@ def parseNpyCmd := `[Cli|
     input : String;      ".npy file to parse"
 ]
 
+def runTests (_ : Parsed) : IO UInt32 := do
+  -- Just pytest for now, but add Lean tests here as well
+  -- pytest will exit nonzero on it's own, so we don't need to check exit code
+  IO.println "Running PyTest..."
+  let stdout <- IO.Process.run { cmd := "pytest" }
+  IO.println stdout
+  return 0
+
+def runTestsCmd := `[Cli|
+  "test" VIA runTests;
+  "Run tests"
+]
+
 def tensorlibCmd : Cmd := `[Cli|
   tensorlib NOOP; ["0.0.1"]
   "TensorLib is a NumPy-like library for Lean."
 
   SUBCOMMANDS:
-    parseNpyCmd
+    parseNpyCmd;
+    runTestsCmd
 ]
 
 def main (args : List String) : IO UInt32 :=

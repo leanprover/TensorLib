@@ -1,1 +1,3 @@
 /.lake/
+/.hypothesis/
+**/__pycache__/
