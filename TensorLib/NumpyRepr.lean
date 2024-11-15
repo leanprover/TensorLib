@@ -528,11 +528,9 @@ end Parse
 
 section Save
 
-private def pushList (a : ByteArray) (xs : List UInt8) : ByteArray := xs.foldl (fun a b => a.push b) a
+private def pushList (a : ByteArray) (xs : List UInt8) : ByteArray := a.append xs.toByteArray
 
-private def pushChars (a : ByteArray) (xs : List Char) : ByteArray := xs.foldl (fun a b => a.push (b.toUInt8)) a
-
-private def pushString (a : ByteArray) (xs : String) : ByteArray := pushChars a xs.toList
+private def pushString (a : ByteArray) (xs : String) : ByteArray := a.append xs.toUTF8
 
 private def pushStrings (a : ByteArray) (xs : List String) : ByteArray := xs.foldl pushString a
 
