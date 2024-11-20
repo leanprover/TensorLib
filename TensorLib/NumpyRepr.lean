@@ -1,7 +1,6 @@
 import Init.System.IO
 import Init.System.FilePath
 import Mathlib.Tactic
-import TensorLib.NonEmptyList
 import TensorLib.TensorElement
 
 /-!
@@ -113,33 +112,38 @@ as a 1d matrix with 0 elements.
 (Assuming we allow 0s in other dimensions, we can shape-check the empty tensor at other shapes, e.g.
 `np.array([]).reshape([1,2,3,0,5])` succeeds.)
 
-The only way to have an empty shape in Numpy is as
+The only way to have an empty shape in Numpy is as a "scalar array" (or "array scalar" depending on the document.)
+
+    https://numpy.org/doc/stable/reference/arrays.scalars.html
+
+A scalar array is conceptually a boxed scalar with an empty shape
+
+```
+>>> np.array(1).shape
+()
+```
+
+`None` also yields an empty shape, but we ignore this case.
 
 ```
 >>> np.array(None).shape
 ()
 ```
 
-We can't write None in Lean, nor do we want to. If we allow empty lists in shape computation, we
-will need to continually handle the [] case with something like
+Strides also are empty for scalar arrays.
 
 ```
-match shape with
-| [] => impossible
-| x :: xs => E(x, xs)
+>>> np.array(1).strides
+()
 ```
-
-As a result, we would either be in an error monad constantly for  no reason, or need to pass
-non-emptiness proofs around. For now, we avoid this case using NonemptyList.
 -/
-abbrev Shape := NonEmptyList Nat
-abbrev Strides := NonEmptyList Nat
+abbrev Shape := List Nat
+abbrev Strides := List Nat
 
 namespace Shape
 
 --! The number of elements in a tensor. All that's needed is the shape for this calculation.
-def count (s : Shape) : Nat := match s with
-| .mk x xs => xs.foldl (fun x y => x * y) x
+def count (s : Shape) : Nat := s.prod
 
 /-!
 Strides can be computed from the shape by figuring out how many elements you
@@ -149,21 +153,30 @@ element.
 A given shape can have different strides if the tensor is a view of another
 tensor. For example, in a square matrix, the transposed matrix view has the same
 shape but the strides change.
+
+Broadcasting does funny things to strides, e.g. the stride can be 0 on a dimension,
+so this is just the default case.
 -/
 def defaultStrides (dtype : NumpyDtype) (s : Shape) : Strides :=
-  let s := s.reverse
+  if H : s.isEmpty then [] else
+  let s' := s.reverse
   let bytes := dtype.bytes
   let rec loop (xs : List ℕ) (lastShape lastDimSize : ℕ): List ℕ := match xs with
   | [] => []
   | d :: ds =>
     let rest := loop ds (lastShape * lastDimSize) d
     lastShape * lastDimSize :: rest
-  let res : Strides := { hd := dtype.bytes, tl := loop s.tl bytes s.hd }
+  let ok : s' ≠ [] := by
+    have H1 : s' = s.reverse := by trivial
+    simp [H1]
+    simp at H
+    exact H
+  let res : Strides := dtype.bytes :: loop s'.tail bytes (s'.head ok)
   res.reverse
 
-#eval defaultStrides NumpyDtype.uint32 [2]
-#eval defaultStrides NumpyDtype.uint32 [2, 3]
-#eval defaultStrides NumpyDtype.uint32 [2, 3, 5, 7]
+#guard defaultStrides NumpyDtype.uint32 [2] == [4]
+#guard defaultStrides NumpyDtype.uint32 [2, 3] == [12, 4]
+#guard defaultStrides NumpyDtype.uint32 [2, 3, 5, 7] == [420, 140, 28, 4]
 
 end Shape
 
@@ -300,8 +313,8 @@ private def oneExtendPrefix (b : Broadcast) : Broadcast :=
   let n1 := b.left.length
   let n2 := b.right.length
   if n1 <= n2
-  then { b with left := .appendListL (List.replicate (n2 - n1) 1) b.left }
-  else { b with right := .appendListL (List.replicate (n1 - n2) 1) b.right }
+  then { b with left := List.replicate (n2 - n1) 1 ++ b.left }
+  else { b with right := List.replicate (n1 - n2) 1 ++ b.right }
 
 private theorem oneExtendPrefixLength (b : Broadcast) :
   let b' := oneExtendPrefix b
@@ -311,10 +324,8 @@ private theorem oneExtendPrefixLength (b : Broadcast) :
   simp [oneExtendPrefix]
   by_cases H : left.length <= right.length
   . simp [H]
-    rw [NonEmptyList.appendListLLength, List.length_replicate, Nat.sub_add_cancel]
-    exact H
   . simp [H]
-    rw [NonEmptyList.hAppendListLLength, List.length_replicate, Nat.sub_add_cancel]
+    rw [Nat.sub_add_cancel]
     linarith
 
 private def matchPairs (b : Broadcast) : Option Shape :=
@@ -325,7 +336,7 @@ private def matchPairs (b : Broadcast) : Option Shape :=
       else if x == 1 then some y
       else if y == 1 then some x
       else none
-  traverse f (NonEmptyList.zip b.left b.right)
+  traverse f (b.left.zip b.right)
 
 --! Returns the shape resulting from broadcast the arguments
 def broadcast (b : Broadcast) : Option Shape := matchPairs (oneExtendPrefix b)
@@ -333,8 +344,8 @@ def broadcast (b : Broadcast) : Option Shape := matchPairs (oneExtendPrefix b)
 --! Whether broadcasting is possible
 def canBroadcast (b : Broadcast) : Bool := (broadcast b).isSome
 
-#eval matchPairs (Broadcast.mk [1, 2, 3] [7, 2, 1])
-#eval broadcast (Broadcast.mk [1, 2, 3] [7, 7, 9, 2, 1])
+#guard matchPairs (Broadcast.mk [1, 2, 3] [7, 2, 1]) == some [7, 2, 3]
+#guard broadcast (Broadcast.mk [1, 2, 3] [7, 7, 9, 2, 1]) == some [7, 7, 9, 2, 3]
 
 -- todo: add plausible properties when property-based testing settles down in Lean-land
 #guard
@@ -344,7 +355,7 @@ def canBroadcast (b : Broadcast) : Bool := (broadcast b).isSome
  let b2 := Broadcast.mk x1 x2
  oneExtendPrefix b1 == b1 &&
  broadcast b2 == broadcast b1 &&
- broadcast b2 == some (.fromList! [1, 2, 3])
+ broadcast b2 == some [1, 2, 3]
 
 end Broadcast
 
@@ -453,7 +464,7 @@ def parseCommaList {T : Type} (start : Char) (end_ : Char) (p : PState T) : PSta
 
 partial def parseShape : PState Shape := do
   let xs <- parseCommaList '(' ')' parseToken
-  return .fromList! (xs.map (fun x => x.toNat!))
+  return xs.map (fun x => x.toNat!)
 
 -- major/minor/header-length
 def parseHeader : PState (UInt8 × UInt8) := do
@@ -557,8 +568,13 @@ private def toByteArray! (repr : NumpyRepr) : ByteArray :=
     boolString repr.header.fortranOrder,
     ", 'shape': (",
   ]
-  let a := pushString a (toString repr.header.shape.hd)
-  let a := repr.header.shape.tl.foldl (fun a d => pushString (pushString a ", ") (toString d)) a
+  let shape := repr.header.shape
+  let a := if H : shape.isEmpty then a else
+    let ok : shape ≠ [] := by
+      simp at H
+      exact H
+    let a := pushString a (toString (shape.head ok))
+    repr.header.shape.tail.foldl (fun a d => pushString (pushString a ", ") (toString d)) a
   let a := pushString a "), }"
   -- We need the header to be aligned
   let padding := 64 - (a.size % 64) - 1 -- -1 for the terminal '\n'
