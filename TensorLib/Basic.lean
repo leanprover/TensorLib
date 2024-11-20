@@ -4,5 +4,4 @@ Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Jean-Baptiste Tristan, Paul Govereau, Sean McLaughlin
 -/
 
-import TensorLib.TensorElement
 import TensorLib.NumpyRepr
