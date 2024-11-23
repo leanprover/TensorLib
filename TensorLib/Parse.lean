@@ -1,6 +1,9 @@
 import Init.System.IO
 import TensorLib.NumpyRepr
 
+open TensorLib.NumpyRepr
+-- open Util -- for Repr instance of ByteArray
+
 --! Parse a .npy file
 -- Inputs to TenCert tend to be arrays stored in .npy files. This module parses and saves the npy file format.
 -- https://numpy.org/devdocs/reference/generated/numpy.lib.format.html
@@ -10,11 +13,16 @@ namespace NumpyRepr
 
 namespace Parse
 
+instance ByteArrayRepr : Repr ByteArray where
+  reprPrec x _ :=
+    let s := toString x.size
+    s!"ByteArray of size {s}"
+
 structure ParsingState where
   source : ByteArray    -- Source data being parsed
   index : Nat           -- Index into source data
   headerEnd : Nat
-  descr : Option NumpyDtype
+  descr : Option Dtype
   fortranOrder : Option Bool
   shape : Option Shape
   debug : List String
@@ -146,7 +154,7 @@ private def parseOneMetadata : PState Unit := do
   colon
   if id == "descr" then
     let v <- quoted parseToken
-    let d <- NumpyDtype.fromString v
+    let d <- Dtype.fromString v
     modify (fun s => { s with descr := some d })
   else if id == "fortran_order" then
     let v <- parseToken
@@ -175,9 +183,8 @@ private def parseNumpyRepr : PState NumpyRepr := do
   let (s : ParsingState) <- get
   match s.descr, s.fortranOrder, s.shape with
   | some descr, some fortranOrder, some shape =>
-    let numpyHeader := NumpyHeader.mk major minor descr fortranOrder shape
-    let strides := shape.defaultStrides descr
-    let repr := NumpyRepr.mk numpyHeader s.source s.headerEnd s.source.size strides
+    let header := NumpyHeader.mk major minor descr fortranOrder shape
+    let repr := { header, data := s.source, startIndex := s.headerEnd, endIndex := s.source.size }
     return repr
   | _, _, _ => .error "Can't parse a metadata value"
 
@@ -263,7 +270,7 @@ private def saveNumpyArray (expr : String) : IO System.FilePath := do
   -- `np.save` appends `.npy` to the file
   return file.addExtension "npy"
 
-private def testTensorElementBV {n : Nat} (w : TensorElement (BitVec n)) (dtype : String) : IO Bool := do
+private def testTensorElementBV (n : Nat) [TensorElement (BitVec n)] (dtype : String) : IO Bool := do
   let file <- saveNumpyArray s!"np.arange(20, dtype='{dtype}').reshape(5, 4)"
   let arr <- Parse.parseFile file
   let _ <- debugPrintln file
@@ -271,7 +278,7 @@ private def testTensorElementBV {n : Nat} (w : TensorElement (BitVec n)) (dtype 
   let _ <- IO.FS.removeFile file
   let expected : List (BitVec n) := List.range 20
   let actual := arr.bind (fun arr => do
-    let rev <- Nat.foldM (fun i acc => (Index.rawIndex w arr i).map (fun i => i :: acc)) [] 20
+    let rev <- Nat.foldM (fun i acc => (Index.getPosition arr i).map (fun i => i :: acc)) [] 20
     return rev.reverse
   )
   let _ <- debugPrintln actual
@@ -280,15 +287,15 @@ private def testTensorElementBV {n : Nat} (w : TensorElement (BitVec n)) (dtype 
   | .ok actual => return expected == actual
 
 -- TODO: Asserting true/false here would be great
-#eval testTensorElementBV TensorElement.BV16 "uint16" -- expect true
-#eval testTensorElementBV TensorElement.BV32 "uint16" -- expect false
-#eval testTensorElementBV TensorElement.BV64 "uint16" -- expect false
-#eval testTensorElementBV TensorElement.BV16 "uint32" -- expect false
-#eval testTensorElementBV TensorElement.BV32 "uint32" -- expect true
-#eval testTensorElementBV TensorElement.BV64 "uint32" -- expect false
-#eval testTensorElementBV TensorElement.BV16 "uint64" -- expect false
-#eval testTensorElementBV TensorElement.BV32 "uint64" -- expect false
-#eval testTensorElementBV TensorElement.BV64 "uint64" -- expect true
+#eval testTensorElementBV 16 "uint16" -- expect true
+#eval testTensorElementBV 32 "uint16" -- expect false
+#eval testTensorElementBV 64 "uint16" -- expect false
+#eval testTensorElementBV 16 "uint32" -- expect false
+#eval testTensorElementBV 32 "uint32" -- expect true
+#eval testTensorElementBV 64 "uint32" -- expect false
+#eval testTensorElementBV 16 "uint64" -- expect false
+#eval testTensorElementBV 32 "uint64" -- expect false
+#eval testTensorElementBV 64 "uint64" -- expect true
 
 end Test
 

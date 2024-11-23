@@ -6,7 +6,7 @@ We largely duplicate the NumPy representation of tensors.
 The binary format is described here: https://numpy.org/doc/stable/reference/generated/numpy.lib.format.html
 and here: https://github.com/numpy/numpy/blob/067cb067cb17a20422e51da908920a4fbb3ab851/doc/neps/nep-0001-npy-format.rst
 
-In addition to being efficient, this allows us to directly parse .npy input files.
+In addition to being an efficient representation, this allows us to directly parse .npy input files.
 -/
 
 namespace TensorLib
@@ -19,96 +19,43 @@ instance [BEq a] : BEq (Err a) where
   | .error x, .error y => x == y
   | _, _ => false
 
-section Util
+namespace Util
 
 -- We generally have huge tensors, so don't show them by default
-instance : Repr ByteArray where
+instance ByteArrayRepr : Repr ByteArray where
   reprPrec x _ :=
     let s := toString x.size
     s!"ByteArray of size {s}"
 
--- UInt8, UInt64, etc don't work well with bv_decide yet. It's coming
-abbrev BV8 := BitVec 8
-abbrev BV16 := BitVec 16
-abbrev BV32 := BitVec 32
-abbrev BV64 := BitVec 64
+def dot [Add a][Mul a][Zero a] (x y : List a) : a := (x.zip y).foldl (fun acc (a, b) => acc + a * b) 0
 
-def BV16ToBytes (n : BV16) : BV8 × BV8 :=
-  let n0 := (n >>> 0o00 &&& 0xFF).truncate 8
-  let n1 := (n >>> 0o10 &&& 0xFF).truncate 8
-  (n0, n1)
-
-def BytesToBV16 (x0 x1 : BV8) : BV16 :=
-  (x0.zeroExtend 16 <<< 0o00) |||
-  (x1.zeroExtend 16 <<< 0o10)
-
-def BV32ToBytes (n : BV32) : BV8 × BV8 × BV8 × BV8 :=
-  let n0 := (n >>> 0o00 &&& 0xFF).truncate 8
-  let n1 := (n >>> 0o10 &&& 0xFF).truncate 8
-  let n2 := (n >>> 0o20 &&& 0xFF).truncate 8
-  let n3 := (n >>> 0o30 &&& 0xFF).truncate 8
-  (n0, n1, n2, n3)
-
-def BytesToBV32 (x0 x1 x2 x3 : BV8) : BV32 :=
-  (x0.zeroExtend 32 <<< 0o00) |||
-  (x1.zeroExtend 32 <<< 0o10) |||
-  (x2.zeroExtend 32 <<< 0o20) |||
-  (x3.zeroExtend 32 <<< 0o30)
-
-def BV64ToBytes (n : BV64) : BV8 × BV8 × BV8 × BV8 × BV8 × BV8 × BV8 × BV8 :=
-  let n0 := (n >>> 0o00 &&& 0xFF).truncate 8
-  let n1 := (n >>> 0o10 &&& 0xFF).truncate 8
-  let n2 := (n >>> 0o20 &&& 0xFF).truncate 8
-  let n3 := (n >>> 0o30 &&& 0xFF).truncate 8
-  let n4 := (n >>> 0o40 &&& 0xFF).truncate 8
-  let n5 := (n >>> 0o50 &&& 0xFF).truncate 8
-  let n6 := (n >>> 0o60 &&& 0xFF).truncate 8
-  let n7 := (n >>> 0o70 &&& 0xFF).truncate 8
-  (n0, n1, n2, n3, n4, n5, n6, n7)
-
-def BytesToBV64 (x0 x1 x2 x3 x4 x5 x6 x7 : BV8) : BV64 :=
-  (x0.zeroExtend 64 <<< 0o00) |||
-  (x1.zeroExtend 64 <<< 0o10) |||
-  (x2.zeroExtend 64 <<< 0o20) |||
-  (x3.zeroExtend 64 <<< 0o30) |||
-  (x4.zeroExtend 64 <<< 0o40) |||
-  (x5.zeroExtend 64 <<< 0o50) |||
-  (x6.zeroExtend 64 <<< 0o60) |||
-  (x7.zeroExtend 64 <<< 0o70)
-
-theorem BV64BytesRoundTrip (n : BV64) :
-  let (x0, x1, x2, x3, x4, x5, x6, x7) := BV64ToBytes n
-  let n' := BytesToBV64 x0 x1 x2 x3 x4 x5 x6 x7
-  n = n' := by
-    unfold BV64ToBytes BytesToBV64
-    bv_decide
-
-theorem BV64BytesRoundTrip1 (x0 x1 x2 x3 x4 x5 x6 x7 : BV8) :
-  let n := BytesToBV64 x0 x1 x2 x3 x4 x5 x6 x7
-  let (x0', x1', x2', x3', x4', x5', x6', x7') := BV64ToBytes n
-  x0 = x0' &&
-  x1 = x1' &&
-  x2 = x2' &&
-  x3 = x3' &&
-  x4 = x4' &&
-  x5 = x5' &&
-  x6 = x6' &&
-  x7 = x7' := by
-    unfold BV64ToBytes BytesToBV64
-    bv_decide
+-- start positions should be non-negative; it is essentially an array index.
+-- However, we need negative strides, so computing new starting positions will
+-- involve arithmetic expressions involving adding negative numbers. For now
+-- we assume we never underflow. In the future we will either log secretly
+-- when this happens (e.g. via something like Util.dbgTrace) or put everything
+-- in a logging monad.
+def safeAdd (x : Nat) (y : Int) : Nat := (max 0 (x + y)).toNat
+#guard safeAdd 7 (-1) == 6
+#guard safeAdd 7 (-8) == 0
 
 end Util
-
-namespace NumpyDtype
 
 inductive ByteOrder where
 | native
 | littleEndian
 | bigEndian
 | notApplicable
-deriving BEq, Repr
+deriving BEq, Repr, Inhabited
+
 
 namespace ByteOrder
+
+def isMultiByte (x : ByteOrder) : Bool := match x with
+| littleEndian | bigEndian => true
+| native | notApplicable => false
+
+theorem littleEndianMultiByte : isMultiByte .littleEndian := by trivial
 
 def toChar (x : ByteOrder) := match x with
 | native => '='
@@ -123,52 +70,123 @@ def fromChar (c : Char) : Err ByteOrder := match c with
 | '|' => .ok notApplicable
 | _ => .error s!"can't parse byte order: {c}"
 
-def UInt8ToBV8 (n : UInt8) : BV8 := BitVec.ofFin n.val
-def BV8ToUInt8 (n : BV8) : UInt8 := UInt8.ofNat n.toFin
+end ByteOrder
 
-private def getBV16Aux (order : ByteOrder) (x0 x1 : BV8) : Err BV16 :=
-  match order with
-  | .notApplicable | .native => .error "illegal byte order"
-  | .littleEndian => .ok (BytesToBV16 x0 x1)
-  | .bigEndian => .ok (BytesToBV16 x1 x0)
+-- UInt8, UInt64, etc don't work well with bv_decide yet. It's coming
+abbrev BV8 := BitVec 8
 
-def getBV16 (order : ByteOrder) (x : ByteArray) (startIndex : Nat) : Err BV16 :=
+def UInt8.toBV8 (n : UInt8) : BV8 := BitVec.ofFin n.val
+
+instance : Coe UInt8 BV8 where
+  coe := UInt8.toBV8
+
+def BV8.toUInt8 (n : BV8) : UInt8 := UInt8.ofNat n.toFin
+
+instance : Coe BV8 UInt8 where
+  coe := BV8.toUInt8
+
+def BV8.toByteArray (x : BV8) : ByteArray := [x].toByteArray
+
+def ByteArray.toBV8 (x : ByteArray) (startIndex : Nat) : Err BV8 :=
+  let n := startIndex
+  if H7 : n < x.size then
+    let H0 : n + 0 < x.size := by linarith
+    let x0 := x.get (Fin.mk _ H0)
+    .ok (UInt8.toBV8 x0)
+  else .error "Index out of range"
+
+abbrev BV16 := BitVec 16
+
+def BV16.toBytes (n : BV16) : BV8 × BV8 :=
+  let n0 := (n >>> 0o00 &&& 0xFF).truncate 8
+  let n1 := (n >>> 0o10 &&& 0xFF).truncate 8
+  (n0, n1)
+
+def BV16.ofBytes (x0 x1 : BV8) : BV16 :=
+  (x0.zeroExtend 16 <<< 0o00) |||
+  (x1.zeroExtend 16 <<< 0o10)
+
+def ByteArray.toBV16 (x : ByteArray) (startIndex : Nat) (order : ByteOrder) : Err BV16 :=
   let n := startIndex
   if H7 : n + 1 < x.size then
     let H0 : n + 0 < x.size := by linarith
     let H1 : n + 1 < x.size := by linarith
-    let x0 := UInt8ToBV8 $ x.get (Fin.mk _ H0)
-    let x1 := UInt8ToBV8 $ x.get (Fin.mk _ H1)
-    getBV16Aux order x0 x1
+    let x0 := x.get (Fin.mk _ H0)
+    let x1 := x.get (Fin.mk _ H1)
+    match order with
+    | .notApplicable | .native => .error "illegal byte order"
+    | .littleEndian => .ok (BV16.ofBytes x0 x1)
+    | .bigEndian => .ok (BV16.ofBytes x1 x0)
   else .error "Index out of range"
 
-private def getBV32Aux (order : ByteOrder) (x0 x1 x2 x3 : BV8) : Err BV32 :=
-  match order with
-  | .notApplicable | .native => .error "illegal byte order"
-  | .littleEndian => .ok (BytesToBV32 x0 x1 x2 x3)
-  | .bigEndian => .ok (BytesToBV32 x3 x2 x1 x0)
+def BV16.toByteArray (x : BV16) (ord : ByteOrder) (_H : ord.isMultiByte): ByteArray :=
+  let (x0, x1) := x.toBytes
+  match ord with
+  | .littleEndian => [x0, x1].toByteArray
+  | .bigEndian => [x1, x0].toByteArray
 
-def getBV32 (order : ByteOrder) (x : ByteArray) (startIndex : Nat) : Err BV32 :=
+abbrev BV32 := BitVec 32
+
+def BV32.toBytes (n : BV32) : BV8 × BV8 × BV8 × BV8 :=
+  let n0 := (n >>> 0o00 &&& 0xFF).truncate 8
+  let n1 := (n >>> 0o10 &&& 0xFF).truncate 8
+  let n2 := (n >>> 0o20 &&& 0xFF).truncate 8
+  let n3 := (n >>> 0o30 &&& 0xFF).truncate 8
+  (n0, n1, n2, n3)
+
+def BV32.ofBytes (x0 x1 x2 x3 : BV8) : BV32 :=
+  (x0.zeroExtend 32 <<< 0o00) |||
+  (x1.zeroExtend 32 <<< 0o10) |||
+  (x2.zeroExtend 32 <<< 0o20) |||
+  (x3.zeroExtend 32 <<< 0o30)
+
+def ByteArray.toBV32 (x : ByteArray) (startIndex : Nat) (order : ByteOrder) : Err BV32 :=
   let n := startIndex
   if H7 : n + 3 < x.size then
     let H0 : n + 0 < x.size := by linarith
     let H1 : n + 1 < x.size := by linarith
     let H2 : n + 2 < x.size := by linarith
     let H3 : n + 3 < x.size := by linarith
-    let x0 := UInt8ToBV8 $ x.get (Fin.mk _ H0)
-    let x1 := UInt8ToBV8 $ x.get (Fin.mk _ H1)
-    let x2 := UInt8ToBV8 $ x.get (Fin.mk _ H2)
-    let x3 := UInt8ToBV8 $ x.get (Fin.mk _ H3)
-    getBV32Aux order x0 x1 x2 x3
+    let x0 := x.get (Fin.mk _ H0)
+    let x1 := x.get (Fin.mk _ H1)
+    let x2 := x.get (Fin.mk _ H2)
+    let x3 := x.get (Fin.mk _ H3)
+    match order with
+    | .notApplicable | .native => .error "illegal byte order"
+    | .littleEndian => .ok (BV32.ofBytes x0 x1 x2 x3)
+    | .bigEndian => .ok (BV32.ofBytes x3 x2 x1 x0)
   else .error "Index out of range"
 
-private def getBV64Aux (order : ByteOrder) (x0 x1 x2 x3 x4 x5 x6 x7 : BV8) : Err BV64 :=
-  match order with
-  | .notApplicable | .native => .error "illegal byte order"
-  | .littleEndian => .ok (BytesToBV64 x0 x1 x2 x3 x4 x5 x6 x7)
-  | .bigEndian => .ok (BytesToBV64 x7 x6 x5 x4 x3 x2 x1 x0)
+def BV32.toByteArray (x : BV32) (ord : ByteOrder) (_H : ord.isMultiByte): ByteArray :=
+  let (x0, x1, x2, x3) := x.toBytes
+  match ord with
+  | .littleEndian => [x0, x1, x2, x3].toByteArray
+  | .bigEndian => [x3, x2, x1, x0].toByteArray
 
-def getBV64 (order : ByteOrder) (x : ByteArray) (startIndex : Nat) : Err BV64 :=
+abbrev BV64 := BitVec 64
+
+def BV64.toBytes (n : BV64) : BV8 × BV8 × BV8 × BV8 × BV8 × BV8 × BV8 × BV8 :=
+  let n0 := (n >>> 0o00 &&& 0xFF).truncate 8
+  let n1 := (n >>> 0o10 &&& 0xFF).truncate 8
+  let n2 := (n >>> 0o20 &&& 0xFF).truncate 8
+  let n3 := (n >>> 0o30 &&& 0xFF).truncate 8
+  let n4 := (n >>> 0o40 &&& 0xFF).truncate 8
+  let n5 := (n >>> 0o50 &&& 0xFF).truncate 8
+  let n6 := (n >>> 0o60 &&& 0xFF).truncate 8
+  let n7 := (n >>> 0o70 &&& 0xFF).truncate 8
+  (n0, n1, n2, n3, n4, n5, n6, n7)
+
+def BV64.ofBytes (x0 x1 x2 x3 x4 x5 x6 x7 : BV8) : BV64 :=
+  (x0.zeroExtend 64 <<< 0o00) |||
+  (x1.zeroExtend 64 <<< 0o10) |||
+  (x2.zeroExtend 64 <<< 0o20) |||
+  (x3.zeroExtend 64 <<< 0o30) |||
+  (x4.zeroExtend 64 <<< 0o40) |||
+  (x5.zeroExtend 64 <<< 0o50) |||
+  (x6.zeroExtend 64 <<< 0o60) |||
+  (x7.zeroExtend 64 <<< 0o70)
+
+def ByteArray.toBV64 (x : ByteArray) (startIndex : Nat) (order : ByteOrder) : Err BV64 :=
   let n := startIndex
   if H7 : n + 7 < x.size then
     let H0 : n + 0 < x.size := by linarith
@@ -178,28 +196,55 @@ def getBV64 (order : ByteOrder) (x : ByteArray) (startIndex : Nat) : Err BV64 :=
     let H4 : n + 4 < x.size := by linarith
     let H5 : n + 5 < x.size := by linarith
     let H6 : n + 6 < x.size := by linarith
-    let x0 := UInt8ToBV8 $ x.get (Fin.mk _ H0)
-    let x1 := UInt8ToBV8 $ x.get (Fin.mk _ H1)
-    let x2 := UInt8ToBV8 $ x.get (Fin.mk _ H2)
-    let x3 := UInt8ToBV8 $ x.get (Fin.mk _ H3)
-    let x4 := UInt8ToBV8 $ x.get (Fin.mk _ H4)
-    let x5 := UInt8ToBV8 $ x.get (Fin.mk _ H5)
-    let x6 := UInt8ToBV8 $ x.get (Fin.mk _ H6)
-    let x7 := UInt8ToBV8 $ x.get (Fin.mk _ H7)
-    getBV64Aux order x0 x1 x2 x3 x4 x5 x6 x7
+    let x0 := x.get (Fin.mk _ H0)
+    let x1 := x.get (Fin.mk _ H1)
+    let x2 := x.get (Fin.mk _ H2)
+    let x3 := x.get (Fin.mk _ H3)
+    let x4 := x.get (Fin.mk _ H4)
+    let x5 := x.get (Fin.mk _ H5)
+    let x6 := x.get (Fin.mk _ H6)
+    let x7 := x.get (Fin.mk _ H7)
+    match order with
+    | .notApplicable | .native => .error "illegal byte order"
+    | .littleEndian => .ok (BV64.ofBytes x0 x1 x2 x3 x4 x5 x6 x7)
+    | .bigEndian => .ok (BV64.ofBytes x7 x6 x5 x4 x3 x2 x1 x0)
   else .error "Index out of range"
 
--- #guard doesn't work here. Not sure why.
-#eval
-  let n : BV64 := 0x3FFAB851EB851EB8
-  let (x0, x1, x2, x3, x4, x5, x6, x7) := BV64ToBytes n
-  -- Big-endian array layout
-  let data := ByteArray.mk (Array.mkArray8 (BV8ToUInt8 x0) (BV8ToUInt8 x1) (BV8ToUInt8 x2) (BV8ToUInt8 x3) (BV8ToUInt8 x4) (BV8ToUInt8 x5) (BV8ToUInt8 x6) (BV8ToUInt8 x7))
-  do
-    let n' <- getBV64 ByteOrder.littleEndian data 0
-    return n == n'
+def BV64.toByteArray (x : BV64) (ord : ByteOrder) (_H : ord.isMultiByte): ByteArray :=
+  let (x0, x1, x2, x3, x4, x5, x6, x7) := x.toBytes
+  match ord with
+  | .littleEndian => [x0, x1, x2, x3, x4, x5, x6, x7].toByteArray
+  | .bigEndian => [x7, x6, x5, x4, x3, x2, x1, x0].toByteArray
 
-end ByteOrder
+theorem BV64.BytesRoundTrip (n : BV64) :
+  let (x0, x1, x2, x3, x4, x5, x6, x7) := BV64.toBytes n
+  let n' := BV64.ofBytes x0 x1 x2 x3 x4 x5 x6 x7
+  n = n' := by
+    unfold BV64.toBytes BV64.ofBytes
+    bv_decide
+
+theorem BV64.BytesRoundTrip1 (x0 x1 x2 x3 x4 x5 x6 x7 : BV8) :
+  let n := BV64.ofBytes x0 x1 x2 x3 x4 x5 x6 x7
+  let (x0', x1', x2', x3', x4', x5', x6', x7') := BV64.toBytes n
+  x0 = x0' &&
+  x1 = x1' &&
+  x2 = x2' &&
+  x3 = x3' &&
+  x4 = x4' &&
+  x5 = x5' &&
+  x6 = x6' &&
+  x7 = x7' := by
+    unfold BV64.toBytes BV64.ofBytes
+    bv_decide
+
+#guard (
+  let n : BV64 := 0x3FFAB851EB851EB8
+  do
+    let arr := n.toByteArray .littleEndian ByteOrder.littleEndianMultiByte
+    let n' <- ByteArray.toBV64 arr 0 .littleEndian
+    return n == n') == .ok true
+
+namespace Dtype
 
 /-! The subset of types NumPy supports that we care about -/
 inductive Name where
@@ -215,15 +260,19 @@ inductive Name where
 | float16
 | float32
 | float64
-deriving BEq, Repr
+deriving BEq, Repr, Inhabited
 
 namespace Name
 
 instance : ToString Name where
   toString x := (repr x).pretty
 
+def isMultiByte (x : Name) : Bool := match x with
+| bool | int8 | uint8 => false
+| _ => true
+
 --! Number of bytes used by each element of the given dtype
-def numBytes (x: Name): Nat := match x with
+def itemsize (x : Name) : Nat := match x with
 | float64 | int64 | uint64 => 8
 | float32 | int32 | uint32 => 4
 | float16 | int16 | uint16 => 2
@@ -269,34 +318,36 @@ def toString (t : Name) : String := match t with
 
 end Name
 
-end NumpyDtype -- temporarily close the namespace so we don't duplicate the structure name
+end Dtype -- temporarily close the namespace so we don't duplicate the structure name
 
-structure NumpyDtype where
-  name : NumpyDtype.Name
-  order : NumpyDtype.ByteOrder
-deriving BEq, Repr
+structure Dtype where
+  name : Dtype.Name
+  order : ByteOrder
+deriving BEq, Repr, Inhabited
 
-namespace NumpyDtype
+namespace Dtype
 
-def numBytes (t : NumpyDtype) := t.name.numBytes
+def byteOrderOk (x : Dtype) : Prop := !x.name.isMultiByte || (x.name.isMultiByte && x.order.isMultiByte)
 
-def fromString (s : String) : Err NumpyDtype :=
+def itemsize (t : Dtype) := t.name.itemsize
+
+def fromString (s : String) : Err Dtype :=
   if s.length == 0 then .error "Empty dtype string" else
   do
     let order <- ByteOrder.fromChar (s.get 0)
     let name <- Name.fromString (s.drop 1)
     return { name, order }
 
-def toString (t : NumpyDtype) : String := t.order.toChar.toString.append t.name.toString
+def toString (t : Dtype) : String := t.order.toChar.toString.append t.name.toString
 
 -- Examples
-private def littleEndian (name : Name) : NumpyDtype := { name, order := ByteOrder.littleEndian }
-private def uint8 : NumpyDtype := { name := Name.uint8 , order := ByteOrder.notApplicable }
-private def uint16 : NumpyDtype := littleEndian Name.uint16
-private def uint32 : NumpyDtype := littleEndian Name.uint32
-private def uint64 : NumpyDtype := littleEndian Name.uint64
+private def littleEndian (name : Name) : Dtype := { name, order := ByteOrder.littleEndian }
+private def uint8 : Dtype := { name := Name.uint8 , order := ByteOrder.notApplicable }
+private def uint16Little : Dtype := littleEndian Name.uint16
+private def uint32Little : Dtype := littleEndian Name.uint32
+private def uint64Little : Dtype := littleEndian Name.uint64
 
-end NumpyDtype
+end Dtype
 
 /-!
 Shapes and strides in tensors are represented as lists, where the length of the
@@ -349,14 +400,46 @@ Strides also are empty for scalar arrays.
 >>> np.array(1).strides
 ()
 ```
+
+-- Shape is independent of the size of the dtype.
 -/
 abbrev Shape := List Nat
-abbrev Strides := List Nat
-abbrev Index := List Nat
+
+/-!
+The strides are how many bytes you need to skip to get to the next element in that
+"row". For example, in an array of 8-byte data with shape 2, 3, the strides are (24, 8).
+Strides are also useful assuming 1-byte data for going back and forth between different
+representations of the data. E.g. see `Tree` below.
+
+Strides is typically used with the dtype size. However, it is also useful with byte size
+1 to convert between different representations of the data.
+-/
+abbrev Strides := List Int -- Nonzero
+
+
+-- The term "index" is overloaded a lot in NumPy. We don't have great alternative names,
+-- so we're going with different extensions of the term. The `DimIndex` is the index in a
+-- multi-dimensional array (as opposed to in the flat data, see `Position` below).
+-- For example, in an array with shape (4, 2, 3), the `DimIndex` of the last element is (3, 1, 2)
+-- DimIndex is independent of the size of the dtype.
+abbrev DimIndex := List Nat
+
+-- A `Position` is the index in the flat data array. For example, In an array with shape
+-- 2, 3, the position of the element at (1, 2) is 5.
+-- Position is independent of the size of the dtype.
+abbrev Position := ℕ
+
+inductive DataOrder where
+| C
+| Fortran
+deriving Repr, Inhabited
 
 namespace Shape
 
 --! The number of elements in a tensor. All that's needed is the shape for this calculation.
+-- TODO: cache this? Not sure how this works in Lean. Do we need to make Shape a struct and
+-- put it in the record?
+
 def count (s : Shape) : Nat := s.prod
 
 /-!
@@ -371,10 +454,11 @@ shape but the strides change.
 Broadcasting does funny things to strides, e.g. the stride can be 0 on a dimension,
 so this is just the default case.
 -/
-def defaultStrides (dtype : NumpyDtype) (s : Shape) : Strides :=
+def unitStrides (s : Shape) (dataOrder : DataOrder) : Strides := match dataOrder with
+| DataOrder.Fortran => [] -- Unimplemented
+| DataOrder.C =>
   if H : s.isEmpty then [] else
   let s' := s.reverse
-  let bytes := dtype.numBytes
   let rec loop (xs : List ℕ) (lastShape lastDimSize : ℕ): List ℕ := match xs with
   | [] => []
   | d :: ds =>
@@ -385,14 +469,54 @@ def defaultStrides (dtype : NumpyDtype) (s : Shape) : Strides :=
     simp [H1]
     simp at H
     exact H
-  let res : Strides := dtype.numBytes :: loop s'.tail bytes (s'.head ok)
+  let res : Strides := 1 :: loop s'.tail 1 (s'.head ok)
   res.reverse
 
-#guard defaultStrides NumpyDtype.uint32 [2] == [4]
-#guard defaultStrides NumpyDtype.uint32 [2, 3] == [12, 4]
-#guard defaultStrides NumpyDtype.uint32 [2, 3, 5, 7] == [420, 140, 28, 4]
+def cUnitStrides (s : Shape) : Strides := s.unitStrides DataOrder.C
+
+#guard cUnitStrides [2] == [1]
+#guard cUnitStrides [2, 3] == [3, 1]
+#guard cUnitStrides [2, 3, 5, 7] == [105, 35, 7, 1]
+
+def sizedStrides (s : Shape) (dtype : Dtype) : Strides := List.map (fun x => x * dtype.itemsize) (cUnitStrides s)
+
+-- Going from position to DimIndex is complicated by the possibility of
+-- negative strides.
+-- x x x x x x x x x x
+--         ^         ^
+--         p         s
+-- For example, in the 1D array of length 10 above, the start position is at the end.
+-- Assume, for example, that we obtained this array from the following sequence
+-- # arange(10)[10 : 0 : -1]
+-- #
+def positionToDimIndex (strides : Strides) (n : Position) : DimIndex :=
+  let foldFn acc stride :=
+    let (posn, idx) := acc
+    let div := (posn / stride).natAbs
+    (Util.safeAdd posn (- div * stride), div :: idx)
+  let (_, idx) := strides.foldl foldFn (n, [])
+  idx.reverse
+
+-- One-based strides
+-- def dimIndexToPosition (strides : Strides) (index : DimIndex) : Position := Util.dot strides index
+
+-- #guard positionToDimIndex [3, 1] 4 == [1, 1]
+-- #guard dimIndexToPosition [3, 1] [1, 1] == 4
+
+-- -- TODO: Make an iterator here rather than constructing the lists
+-- def allDimIndices (shape : Shape) : List DimIndex :=
+--   let strides := unitStrides shape DataOrder.C
+--   let count := shape.count
+--   let foldFn acc :=
+--     let (position, indices) := acc
+--     (position + 1, positionToDimIndex strides position :: indices)
+--   let (position, indices) := shape.count.iterate foldFn (0, [])
+--   if position < count then [] else indices.reverse
+
+-- #guard allDimIndices [3, 2] == [[0, 0], [0, 1], [1, 0], [1, 1], [2, 0], [2, 1]]
 
 end Shape
+
 
 /-!
 This is the header of the on-disk Numpy format, typically with the .npy file extension.
@@ -401,18 +525,18 @@ https://numpy.org/doc/stable/reference/generated/numpy.lib.format.html#format-ve
 -/
 structure NumpyHeader where
   -- Version is major.minor
-  major : UInt8
-  minor : UInt8
+  major : UInt8 := 1
+  minor : UInt8 := 0
   -- Nat is definitely not the final representation. We need
   -- some function from python type descriptor and element to the appropriate
   -- Lean type.
-  descr : NumpyDtype
-  -- Fortran order is column-major
-  -- C order is row major
-  -- We can transpose by flipping this bit
-  fortranOrder : Bool
+  descr : Dtype
+  -- Fortran order is column-major, C order is row major.
+  -- Used for calculating the default strides
+  -- TODO: make this an enum
+  dataOrder : DataOrder := DataOrder.C
   shape : Shape
-  deriving Repr
+  deriving Repr, Inhabited
 
 namespace NumpyHeader
 
@@ -420,29 +544,41 @@ namespace NumpyHeader
 A npy binary file has a header, some padding, then the data. This method computes the
 size of the data portion of the file.
 -/
-def dataSize (header : NumpyHeader): Nat := header.descr.numBytes * header.shape.count
+def dataSize (header : NumpyHeader): Nat := header.descr.itemsize * header.shape.count
 
 end NumpyHeader
-
 
 /-!
 A NumpyRepr is the data of the tensor, along with all metadata required to do
 efficient computation. The `startIndex`, `endIndex`, and `strides` are inferred
 from parsing or computed during a view creation.
 -/
+-- TODO: Add a `base` field to track aliasing? NumPy does this and it may make sense for us.
+-- TODO: Do we want this to be inductive to handle array scalars? https://numpy.org/doc/stable/reference/arrays.scalars.html#arrays-scalars
+--       Will forcing those into this type for now, but it seems wasteful.
+-- TODO: Get useful info out of the header into the main struct
+-- TODO: Get rid of endIndex. Not used. Access is controlled by startIndex and shape/stride/byte size only
 structure NumpyRepr where
   header : NumpyHeader
   data : ByteArray
-  startIndex : Nat -- Pointer to the first byte of ndarray data, called `offset` in numpy
-  endIndex : Nat   -- Pointer to the byte after the last byte of ndarray data
+  startIndex : Nat := 0 -- TODO: Rename "index" here as "position". Index has too many other meanings. Pointer to the first byte of ndarray data, called `offset` in numpy
+  endIndex : Nat := header.dataSize  -- Pointer to the byte after the last byte of ndarray data
   -- invariant: startIndex <= endIndex
   -- invariant: endIndex - startIndex = header.descr.numBytes * shape.count
   -- invariant: header.endIndex <= |data|
   -- invariant: header.dataSize <= |data|
-  strides : Strides
-  deriving Repr
+  -- Strides independent of the data size
+  unitStrides : Strides := header.shape.unitStrides header.dataOrder
+  deriving Repr, Inhabited
 
 namespace NumpyRepr
+
+def empty (dtype : Dtype) (shape : Shape) : NumpyRepr :=
+  let header : NumpyHeader := { descr := dtype, shape := shape }
+  let data := ByteArray.mkEmpty (dtype.itemsize * shape.count)
+  { header, data }
+
+def dtype (x : NumpyRepr) : Dtype := x.header.descr
 
 --! shape
 def shape (x : NumpyRepr) : Shape := x.header.shape
@@ -454,92 +590,94 @@ def ndim (x : NumpyRepr) : ℕ := x.shape.length
 def size (x : NumpyRepr) : ℕ := x.shape.count
 
 --! number of bytes representing each element
-def itemsize (x : NumpyRepr) : ℕ := x.header.descr.numBytes
+def itemsize (x : NumpyRepr) : ℕ := x.header.descr.itemsize
+
+def strides (x : NumpyRepr) : Strides := x.unitStrides.map (fun v => x.itemsize * v)
 
 --! number of bytes representing the entire tensor
 def nbytes (x : NumpyRepr) : ℕ := x.itemsize * x.size
 
-/-!
-Reshaping a tensor is just re-interpreting the elements in
-a different order. This will also impact the iteration order/strides
-when we implement those.
--/
+-- Views can traverse backward through the data, so we need to check both the front
+-- and the back of the data to ensure a position is in range
+def inRange (x : NumpyRepr) (n : ℕ) : Bool := x.startIndex <= n && n < x.endIndex
+
+--! Reshaping a tensor is just re-interpreting the elements in a different order.
+-- FIXME: The unit strides of the input should be inputs into the stride calculation
+-- for the reshaped array. I'm not quite sure how this works yet.
 def reshape (x : NumpyRepr) (shape : Shape) : Err NumpyRepr := do
   if x.shape.count == shape.count then
-    return { x with header.shape := shape }
+    return { x with header.shape := shape, unitStrides := shape.unitStrides x.header.dataOrder }
   else
     .error "Reshaping must have the same number of implied elements"
 
-class TensorElement (a: Type) where
-  numBytes : Nat
-  fromByteArray (byteOrder : NumpyDtype.ByteOrder) (arr : ByteArray) (startIndex : Nat) : Err a
+def reshape! (x : NumpyRepr) (shape : Shape) : NumpyRepr :=
+  match reshape x shape with
+  | .error msg => panic msg
+  | .ok x => x
+
+class TensorElement (a : Type) where
+  dtype : Dtype
+  itemsize : Nat
+  ofNat : Nat -> a
+  toByteArray (x : a) : ByteArray
+  fromByteArray (arr : ByteArray) (startIndex : Nat) : Err a
 
 namespace TensorElement
 
--- Style of repeating the arguments to a class followed by variables was
--- suggested by Lean office hours folks
--- variable (a: Type)
--- variable [Add a][Sub a][Mul a][Neg a]
+-- An array-scalar is a box around a scalar with nil shape that can be used for array operations like broadcasting
+def arrayScalar [w : TensorElement a] (x : a) : NumpyRepr :=
+  let header := { descr := w.dtype, shape := [] }
+  let data := w.toByteArray x
+  { header, data }
 
--- ...Lots of definitions here using the variables above...
+--! An array of the numbers from 0 to n-1
+--! https://numpy.org/doc/2.1/reference/generated/numpy.arange.html
+def arange (a : Type) [w : TensorElement a] (n : Nat) : NumpyRepr :=
+  let header := { descr := w.dtype, shape := [n] }
+  let data := ByteArray.mkEmpty (n * w.itemsize)
+  let foldFn i data :=
+    let bytes := w.toByteArray (w.ofNat i)
+    ByteArray.copySlice bytes 0 data (i * w.itemsize) w.itemsize
+  let data := Nat.fold foldFn n data
+  { header, data }
 
-instance BV16 : TensorElement BV16 where
-  numBytes := 2
-  fromByteArray byteOrder arr startIndex :=
-    if arr.size < startIndex + 2 -- would like to use `numBytes` but it's not resolving
-    then .error "Wrong size array"
-    else byteOrder.getBV16 arr startIndex
+instance BV8Native : TensorElement BV8 where
+  dtype := Dtype.mk .uint8 .native
+  itemsize := 1
+  ofNat n := n
+  toByteArray (x : BV8) : ByteArray := x.toByteArray
+  fromByteArray arr startIndex := ByteArray.toBV8 arr startIndex
 
-instance BV32: TensorElement BV32 where
-  numBytes := 4
-  fromByteArray byteOrder arr startIndex :=
-    if arr.size < startIndex + 4
-    then .error "Wrong size array"
-    else byteOrder.getBV32 arr startIndex
+instance BV16Little : TensorElement BV16 where
+  dtype := Dtype.mk .uint16 .littleEndian
+  itemsize := 2
+  ofNat n := n
+  toByteArray (x : BV16) : ByteArray := x.toByteArray .littleEndian ByteOrder.littleEndianMultiByte
+  fromByteArray arr startIndex := ByteArray.toBV16 arr startIndex .littleEndian
 
-instance BV64: TensorElement BV64 where
-  numBytes := 8
-  fromByteArray byteOrder arr startIndex :=
-    if arr.size < startIndex + 8
-    then .error "Wrong size array"
-    else byteOrder.getBV64 arr startIndex
+instance BV32Little : TensorElement BV32 where
+  dtype := Dtype.mk .uint32 .littleEndian
+  itemsize := 4
+  ofNat n := n
+  toByteArray (x : BV32) : ByteArray := x.toByteArray .littleEndian ByteOrder.littleEndianMultiByte
+  fromByteArray arr startIndex := ByteArray.toBV32 arr startIndex .littleEndian
+
+instance BV64Little : TensorElement BV64 where
+  dtype := Dtype.mk .uint64 .littleEndian
+  itemsize := 8
+  ofNat n := n
+  toByteArray (x : BV64) : ByteArray := x.toByteArray .littleEndian ByteOrder.littleEndianMultiByte
+  fromByteArray arr startIndex := ByteArray.toBV64 arr startIndex .littleEndian
+
+#eval arange BV16 10
 
 end TensorElement
 
-
-namespace Index
-
--- Indexing utility
-private def start (strides : Strides) (index : Index) : Err ℕ :=
-  match strides, index with
-  | [], [] => .error "Can not index with empty list"
-  | [], _ :: _ | _ :: _, [] => .error "Unequal lengths: strides and index"
-  | stride :: strides, i :: index => (start strides index).map (. + i * stride)
-
--- Get a single value from the tensor.
--- TODO: Replace get! with the Fin version. I tried this for a couple hours
--- and failed.
-private def getBytes! (x : NumpyRepr) (index : Index) : Err (List UInt8) := do
-  let gap <- start x.strides index
-  let i := x.startIndex + gap
-  let rec loop (n : ℕ) (acc : List UInt8) : List UInt8 :=
-    match n with
-    | 0 => acc
-    | n + 1 => loop n (x.data.get! (i + n) :: acc)
-  return loop x.itemsize []
-
--- This is a blind index into the array, disregarding the shape.
-def rawIndex (typ : TensorElement a) (x : NumpyRepr) (index : Nat) : Err a :=
-  if typ.numBytes != x.itemsize then .error "byte size mismatch" else -- TODO: Lift this check out so we only do it once
-  typ.fromByteArray x.header.descr.order x.data (x.startIndex + (index * typ.numBytes))
-
-end Index
-
 def transpose (x : NumpyRepr) : NumpyRepr :=
-  let shape := x.header.shape.reverse
+  let shape := x.shape.reverse
   let header := { x.header with shape }
-  let strides := x.strides.reverse
-  { x with header, strides }
+  let unitStrides := x.unitStrides.reverse
+  { x with header, unitStrides }
 
 /-!
 Broadcasting is a convenience and performance trick to allow operations that expect the same

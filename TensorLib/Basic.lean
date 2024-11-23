@@ -6,3 +6,7 @@ Authors: Jean-Baptiste Tristan, Paul Govereau, Sean McLaughlin
 
 import TensorLib.NumpyRepr
 import TensorLib.Parse
+import TensorLib.Format
+import TensorLib.Slice
+import TensorLib.Indexing
+import TensorLib.Ufunc

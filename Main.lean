@@ -6,9 +6,28 @@ Authors: Jean-Baptiste Tristan, Paul Govereau, Sean McLaughlin
 import Cli
 import Init.System.IO
 import TensorLib
+import TensorLib.Format
 
 open Cli
 open TensorLib
+
+def format (p : Parsed) : IO UInt32 := do
+  let shape : List Nat := (p.variableArgsAs! Nat).toList
+  let n := shape.prod
+  IO.println s!"Got shape {shape}"
+  let range := NumpyRepr.TensorElement.arange BV16 n
+  let v := range.reshape! shape
+  let s := Format.reprToString BV16 v
+  IO.println s
+  return 0
+
+def formatCmd := `[Cli|
+  "format" VIA format;
+  "Test formatting"
+
+  ARGS:
+    ...shape : Nat;      "shape to test"
+]
 
 def parseNpy (p : Parsed) : IO UInt32 := do
   let file := p.positionalArg! "input" |>.as! String
@@ -25,6 +44,7 @@ def parseNpy (p : Parsed) : IO UInt32 := do
       IO.println s!"Writing copy to {new}"
       let _ <- NumpyRepr.save! r new
     return 0
+
 
 def parseNpyCmd := `[Cli|
   "parse-npy" VIA parseNpy;
@@ -56,6 +76,7 @@ def tensorlibCmd : Cmd := `[Cli|
   "TensorLib is a NumPy-like library for Lean."
 
   SUBCOMMANDS:
+    formatCmd;
     parseNpyCmd;
     runTestsCmd
 ]
