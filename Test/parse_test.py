@@ -1,20 +1,20 @@
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from hypothesis.extra import numpy as nps
 import numpy as np
 import os
-import subprocess 
+import subprocess
 import tempfile
 import typing
 
 top = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-tensorlib = top + '/bin/tensorlib' 
+tensorlib = top + '/bin/tensorlib'
 
 def call_lean(file : str) -> str:
     return subprocess.check_output(
        [tensorlib, 'parse-npy', '--write', file],
        stderr=subprocess.STDOUT
-       )    
+       )
 
 def round_trip(arr : np.ndarray) -> tuple[str, np.ndarray]:
     (_, f) = tempfile.mkstemp(suffix=".npy")
@@ -24,10 +24,11 @@ def round_trip(arr : np.ndarray) -> tuple[str, np.ndarray]:
 
 dim1 = st.integers(min_value=1, max_value=512)
 dim2 = st.integers(min_value=1, max_value=10_000)
-shape = st.tuples(dim1, dim2) 
+shape = st.tuples(dim1, dim2)
 @given(
     nps.arrays(dtype=np.float32, shape=shape),
 )
+@settings(deadline=None) # The very first call is flakey wrt timing, e.g. 2s vs 100ms. 
 def test_numpy_save_load(arr):
     print(tensorlib)
     print(arr.shape)

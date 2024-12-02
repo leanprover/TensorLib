@@ -836,7 +836,6 @@ private def headerSizeToBytes (n : Nat) : UInt8 × UInt8 :=
 private def next64 (n : Nat) : Nat := 64 - (n % 64)
 
 -- Can we do this with local mutation?
--- TODO: write the correct endian-annotation character. Currently assuming little-endian with '<'
 private def toByteArray! (repr : NumpyRepr) : ByteArray :=
   let a := ByteArray.empty.push 0x93
   let a := pushString a "NUMPY"
@@ -844,7 +843,7 @@ private def toByteArray! (repr : NumpyRepr) : ByteArray :=
   let a := (a.push 0).push 0 -- index 8, 9. We will clobber this with the header size in a moment
   if a.size != 10 then panic s!"Bad header size: {a.size}, should be 9" else
   let a := pushStrings a [
-    "{'descr': '<",
+    "{'descr': '",
     repr.header.descr.toString,
     "', 'fortran_order': ",
     boolString repr.header.fortranOrder,
