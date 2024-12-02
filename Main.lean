@@ -6,7 +6,6 @@ Authors: Jean-Baptiste Tristan, Paul Govereau, Sean McLaughlin
 import Cli
 import Init.System.IO
 import TensorLib
-import TensorLib.NumpyRepr
 
 open Cli
 open TensorLib
@@ -32,7 +31,7 @@ def parseNpyCmd := `[Cli|
   "Parse a .npy file and pretty print the contents"
 
   FLAGS:
-    write; "Also write the result back to `input`.new to test tensor saving"
+    write; "Also write the result back to `input`.new to test saving arrays to disk"
 
   ARGS:
     input : String;      ".npy file to parse"
