@@ -5,3 +5,4 @@ Authors: Jean-Baptiste Tristan, Paul Govereau, Sean McLaughlin
 -/
 
 import TensorLib.NumpyRepr
+import TensorLib.Parse
