@@ -42,9 +42,10 @@ def runTests (_ : Parsed) : IO UInt32 := do
   -- Just pytest for now, but add Lean tests here as well
   -- pytest will exit nonzero on it's own, so we don't need to check exit code
   IO.println "Running PyTest..."
-  let stdout <- IO.Process.run { cmd := "pytest" }
-  IO.println stdout
-  return 0
+  let output <- IO.Process.output { cmd := "pytest" }
+  IO.println s!"stdout: {output.stdout}"
+  IO.println s!"stderr: {output.stderr}"
+  return output.exitCode
 
 def runTestsCmd := `[Cli|
   "test" VIA runTests;
