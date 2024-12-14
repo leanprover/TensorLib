@@ -1,7 +1,7 @@
-import TensorLib.NumpyRepr
+import Aesop
+import TensorLib.Common
 
 namespace TensorLib
-namespace Slice
 
 /-!
 Slices are triples of start/stop/step, all of which can be positive, negative, or missing.
@@ -77,33 +77,15 @@ array([0, 1, 2, 3, 4])
 If we know the size of the array/dimension we are slicing, this can
 all be substantially simplified. With a known dimension, we will compile
 the slice semantics to a more clear datatype.
--/
 
-structure Slice where
-  start : Option Int
-  stop : Option Int
-  step : Option Int
-  StepNz : step != .some 0
-deriving BEq
+-/
+namespace Slice
 
 inductive Dir where
 | Forward
 | Backward
 
--- A slice where we know the size of the array/dimension
-structure DimSlice where
-  dim : Nat
-  dir : Dir
-  start : Nat
-  stop : Nat
-  step : Nat
-  StepNz : step != 0
-  -- A start, stop, or step of `dim` has the same effect as anything larger than `dim`
-  StartOk : start <= dim
-  StopOk : stop <= dim
-  StepOk : step <= dim
-
-namespace Slice
+end Slice
 
 /-
 Defaults for missing parts of the triple are well defined by the docs:
@@ -116,58 +98,192 @@ https://numpy.org/doc/stable/user/basics.indexing.html#slicing-and-striding
 > If j is not given it defaults to n for k > 0 and -n-1 for k < 0 .
 > If k is not given it defaults to 1.
 > Negative values are allowed. The meaning of x[-k] is x[n-k] where `n` is the size of the relevant dimension
+>
+> Note that these requirements from the NumPy docs don't make sense if `n = 0`.
 -/
-def toDimSlice (slice : Slice) (dim : ℕ) : DimSlice :=
-  let (dir, step) := match H: slice.step with
-  | .none => (Dir.Forward, 1)
-  | .some 0 =>
-    let t : False := by
-      let H1 := slice.StepNz
-      rw [H] at H1
-      trivial
-    nomatch t
-  | .some n =>
-    let (dir, n) := if 0 < n then (Dir.Forward, n) else (Dir.Backward, -n)
-    (dir, min dim n.toNat)
-  let start := match slice.start, dir with
-  | .none, .Forward => 0
-  | .none, .Backward => dim - 1
-  | .some n, _ => if n <= 0 then 0 else min dim n.toNat
-  let stop := match slice.stop, dir with
-  | .none, .Forward => dim
-  | .none, .Backward => 0
-  | .some n, _ => if n <= 0 then 0 else min dim n.toNat
-  let StepNz := sorry
-  let StartOk := sorry
-  let StopOk := sorry
-  let StepOk := sorry
-  DimSlice.mk dim dir start stop step StepNz StartOk StopOk StepOk
+structure Slice where
+  start : Option Int
+  stop : Option Int
+  step : Option Int
+  stepNz : step ≠ .some 0
+deriving BEq
 
+instance : Inhabited Slice where
+  default := Slice.mk .none .none .none (by simp)
 
-def isEmpty (slice : Slice) :=
-  (0 < slice.step && slice.stop <= slice.start) ||
-  (slice.step < 0 && slice.start <= slice.stop)
+namespace Slice
 
-def size (slice : Slice) : ℕ := (slice.stop - slice.start) / slice.step.natAbs
+def build (start stop step : Option Int) : Err Slice :=
+  match H : step with
+  | .none =>
+    let stepNz : step ≠ some 0 := by aesop
+    .ok (Slice.mk start stop step stepNz)
+  | .some k =>
+    if H1 : k == 0 then .error "step can't be 0" else
+    let stepNz : step ≠ some 0 := by aesop
+    .ok (Slice.mk start stop step stepNz)
 
-private def oneNz : 1 != 0 := by trivial
-def fromNat (n : Nat) : Slice := Slice.mk n (n+1) 1
-def fromStop (n : Nat) : Slice := Slice.mk 0 n 1
-def fromStartStop (start stop : Nat) : Slice := Slice.mk start stop 1
+private partial def build! (start stop step : Option Int) : Slice :=
+  match build start stop step with
+  | .error msg => panic! msg
+  | .ok s => s
 
+def dir (s : Slice): Dir := match s.step with
+  | .none => Dir.Forward
+  | .some k => if k < 0 then Dir.Backward else Dir.Forward
 
-private def nonneg (n : Int) (dim : Nat) : Err Nat :=
-  if n < 0 then
-    if dim < -n then .error s!"index {n} out of bounds {dim}" else .ok (dim - n).toNat
-  else
-    if dim < n then .error s!"index {n} out of bounds {dim}" else .ok n.toNat
+/-
+Calculating the nat start index of a slice is complicated by the
+NumPy defaults that differ based on direction (forward/backward)
+and negative values.
+-/
+def startOrDefault (s : Slice) (n : Nat) : Nat :=
+  let dir := s.dir
+  match s.start with
+  | .none => match dir with
+    | Dir.Forward => 0
+    | Dir.Backward => n - 1
+  | .some k =>
+    if k < -n then 0
+    else if -n <= k && k < 0 then (n + k).toNat
+    else if 0 <= k && k < n then k.toNat
+    else /- n <= k -/ match dir with
+    | Dir.Forward => n
+    | Dir.Backward => n - 1
 
--- Get rid of negative and too-large values
-def normalize (slice : NumpySlice) (dim : Nat) : Err Slice := do
-  let start <- nonneg slice.start dim
-  let stop <- nonneg slice.stop dim
-  if slice.step == 0 then .error "step can not be 0"
-  else .ok (Slice.mk start stop slice.step)
+/-
+We use an option here to signal that the stopping point for negative step
+is the first element of the list. We can't use 0 because the stopping point
+is exclusive in a slice. [start ... stop) We can't use any negative number
+because the first `n` negative numbers wrap back around to positive numbers.
+-/
+def stopOrDefault (s : Slice) (n : Nat) : Option Nat :=
+  match s.stop, s.dir with
+  | .none, .Forward => .some n
+  | .none, .Backward => .none
+  | .some k, .Forward =>
+    if k < -n then .some 0
+    else if -n <= k && k < 0 then .some (n + k).toNat
+    else if 0 <= k && k < n then .some k.toNat
+    else /- n <= k -/ .some n
+  | .some k, .Backward =>
+    if k < -n then .none
+    else if -n <= k && k < 0 then .some (n + k).toNat
+    else if 0 <= k && k < n then .some k.toNat
+    else /- n <= k -/ .some n
+
+theorem stopRange (s : Slice) (n : Nat) :
+  match s.stopOrDefault n with
+  | .none => True
+  | .some k => k <= n
+:= by
+  unfold stopOrDefault
+  cases s.stop
+  . cases s.dir
+    . simp
+    . simp
+  . rename_i k
+    cases s.dir
+    . simp
+      by_cases H : k < -n
+      all_goals simp [H]
+      by_cases H1 : k < 0
+      . simp [H, H1]
+        aesop
+        all_goals omega
+      . aesop
+        all_goals omega
+    . simp
+      by_cases H : k < -n
+      all_goals simp [H]
+      by_cases H1 : k < 0
+      . simp [H, H1]
+        aesop
+        all_goals omega
+      . aesop
+        all_goals omega
+
+theorem stopForward (s : Slice) (dim : Nat) (H : s.dir = .Forward) : (s.stopOrDefault dim).isSome := by
+  unfold stopOrDefault
+  aesop
+
+def stepOrDefault (s : Slice) : Int := s.step.getD 1
+
+theorem stepForward (s : Slice) (H : s.dir = .Forward) : 0 < s.stepOrDefault := by
+  revert H
+  unfold stepOrDefault dir
+  cases H1 : s.step
+  all_goals simp
+  rename_i k
+  have H2 := s.stepNz
+  aesop
+  omega
+
+def defaults (s : Slice) (dim : Nat) : Nat × Option Nat × Int :=
+  (s.startOrDefault dim, s.stopOrDefault dim, s.stepOrDefault)
+
+def size (s : Slice) (dim : Nat) : Nat :=
+  -- Can't use `defaults` here because I need equalities below which don't work with tuple splits
+  let start := s.startOrDefault dim
+  let stop := s.stopOrDefault dim
+  let step := s.stepOrDefault
+  match H1 : s.dir, H2 : stop with
+  | .Forward, .none =>
+    let k : False := by
+      have H2 := s.stopForward dim H1
+      aesop
+    nomatch k
+  | .Forward, .some stop => (stop - start) / step.toNat
+  | .Backward, .none => (start + 1) / step.natAbs
+  | .Backward, .some stop => (start - stop) / step.natAbs
+
+#guard (Slice.build! .none .none .none).size 10 == 10
+#guard (Slice.build! .none .none (.some (-1))).size 10 == 10
+#guard (Slice.build! .none .none (.some (-2))).size 10 == 5
+#guard (Slice.build! .none .none (.some (2))).size 10 == 5
+#guard (Slice.build! (.some 5) .none .none).size 10 == 5
+#guard (Slice.build! (.some 5) .none (.some 1)).size 10 == 5
+#guard (Slice.build! (.some 5) .none (.some 3)).size 10 == 1
+#guard (Slice.build! (.some 5) .none (.some (-1))).size 10 == 6
+#guard (Slice.build! (.some 5) .none (.some (-3))).size 10 == 2
+#guard (Slice.build! .none (.some 5) .none).size 10 == 5
+#guard (Slice.build! .none (.some 5) (.some (-1))).size 10 == 4
+
+-- Reference implementation. A numpy slice doesn't copy the data, but just updates the
+-- start and strides of the ndarray.
+private partial def sliceList! [Inhabited a] (s : Slice) (xs : List a) : List a :=
+  let n := xs.length
+  if n == 0 then [] else
+  -- 0 ≤ start ≤ n
+  let (start, stop, step) := s.defaults n
+  let done (i : Int) : Bool := i < 0 || n ≤ i || stop.any (fun k => k == i)
+  -- TODO: prove termination
+  let rec loop (acc : List a) (i : Int) : List a :=
+    if done i then acc.reverse else
+    -- TODO: prove indexing is in bounds
+    loop (xs.get! i.toNat :: acc) (i + step)
+  loop [] start
+
+#guard (Slice.build! .none .none .none).sliceList! [0, 1, 2, 3, 4] == [0, 1, 2, 3, 4]
+#guard (Slice.build! (.some 0) .none .none).sliceList! [0, 1, 2, 3, 4] == [0, 1, 2, 3, 4]
+#guard (Slice.build! (.some 0) (.some 5) .none).sliceList! [0, 1, 2, 3, 4] == [0, 1, 2, 3, 4]
+#guard (Slice.build! (.some 0) (.some 5) (.some 1)).sliceList! [0, 1, 2, 3, 4] == [0, 1, 2, 3, 4]
+#guard (Slice.build! (.some 3) (.some 5) (.some 1)).sliceList! [0, 1, 2, 3, 4] == [3, 4]
+#guard (Slice.build! (.some 10) (.some 5) (.some 1)).sliceList! [0, 1, 2, 3, 4] == []
+#guard (Slice.build! (.some (-10)) (.some 5) (.some 1)).sliceList! [0, 1, 2, 3, 4] == [0, 1, 2, 3, 4]
+#guard (Slice.build! (.some (-10)) (.some 5) (.some 100)).sliceList! [0, 1, 2, 3, 4] == [0]
+#guard (Slice.build! .none .none (.some (-1))).sliceList! [0, 1, 2, 3, 4] == [4, 3, 2, 1, 0]
+#guard (Slice.build! .none (.some 0) (.some (-1))).sliceList! [0, 1, 2, 3, 4] == [4, 3, 2, 1]
+#guard (Slice.build! .none (.some (-5)) (.some (-1))).sliceList! [0, 1, 2, 3, 4] == [4, 3, 2, 1]
+#guard (Slice.build! .none (.some (-6)) (.some (-1))).sliceList! [0, 1, 2, 3, 4] == [4, 3, 2, 1, 0]
+#guard (Slice.build! .none (.some (-600)) (.some (-1))).sliceList! [0, 1, 2, 3, 4] == [4, 3, 2, 1, 0]
+#guard (Slice.build! (.some 4) .none (.some (-1))).sliceList! [0, 1, 2, 3, 4] == [4, 3, 2, 1, 0]
+#guard (Slice.build! (.some 5) .none (.some (-1))).sliceList! [0, 1, 2, 3, 4] == [4, 3, 2, 1, 0]
+#guard (Slice.build! (.some 500) .none (.some (-1))).sliceList! [0, 1, 2, 3, 4] == [4, 3, 2, 1, 0]
+#guard (Slice.build! .none .none (.some 2)).sliceList! [0, 1, 2, 3, 4] == [0, 2, 4]
+#guard (Slice.build! (.some 1) .none (.some 2)).sliceList! [0, 1, 2, 3, 4] == [1, 3]
+#guard (Slice.build! .none .none (.some (-2))).sliceList! [0, 1, 2, 3, 4] == [4, 2, 0]
+#guard (Slice.build! .none .none (.some (-200))).sliceList! [0, 1, 2, 3, 4] == [4]
 
 end Slice
 end TensorLib

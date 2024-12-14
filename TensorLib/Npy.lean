@@ -1,24 +1,145 @@
-import Init.System.IO
-import TensorLib.NumpyRepr
+import TensorLib.Common
+import TensorLib.Dtype
 
-open TensorLib.NumpyRepr
--- open Util -- for Repr instance of ByteArray
+/-!
+We largely duplicate the NumPy representation of tensors.
 
---! Parse a .npy file
--- Inputs to TenCert tend to be arrays stored in .npy files. This module parses and saves the npy file format.
--- https://numpy.org/devdocs/reference/generated/numpy.lib.format.html
+The binary format is described here: https://numpy.org/doc/stable/reference/generated/numpy.lib.format.html
+and here: https://github.com/numpy/numpy/blob/067cb067cb17a20422e51da908920a4fbb3ab851/doc/neps/nep-0001-npy-format.rst
+
+In addition to being an efficient representation, this allows us to directly parse .npy input files.
+-/
 
 namespace TensorLib
-namespace NumpyRepr
+namespace Npy
 
-namespace Parse
+/-!
+NumPy has an extra constructor for byte orders "native", so we just
+copy the other fields.
+-/
+inductive ByteOrder where
+| native -- Leaves the ordering up to the machine reading the data
+| littleEndian
+| bigEndian
+| notApplicable -- single byte types
+deriving BEq, Repr, Inhabited
 
-instance ByteArrayRepr : Repr ByteArray where
+namespace ByteOrder
+
+def toByteOrder (x : ByteOrder) (default : TensorLib.ByteOrder): TensorLib.ByteOrder := match x with
+| .native => default
+| .littleEndian => .littleEndian
+| .bigEndian => .bigEndian
+| .notApplicable => .oneByte
+
+def toChar (x : ByteOrder) := match x with
+| native => '='
+| littleEndian => '<'
+| bigEndian => '>'
+| notApplicable => '|'
+
+def fromChar (c : Char) : Err ByteOrder := match c with
+| '=' => .ok native
+| '<' => .ok littleEndian
+| '>' => .ok bigEndian
+| '|' => .ok notApplicable
+| _ => .error s!"can't parse byte order: {c}"
+
+end ByteOrder
+
+structure Dtype where
+  name : TensorLib.Dtype.Name
+  order : ByteOrder
+deriving BEq, Repr, Inhabited
+
+namespace Dtype
+
+/-!
+Parse a numpy dtype. The first character represents the
+byte order: https://numpy.org/doc/2.1/reference/generated/numpy.dtype.byteorder.html
+-/
+def dtypeNameFromNpyString (s : String) : Err Dtype.Name := match s with
+| "b1" => .ok .bool
+| "i1" => .ok .int8
+| "i2" => .ok .int16
+| "i4" => .ok .int32
+| "i8" => .ok .int64
+| "u1" => .ok .uint8
+| "u2" => .ok .uint16
+| "u4" => .ok .uint32
+| "u8" => .ok .uint64
+| "f2" => .ok .float16
+| "f4" => .ok .float32
+| "f8" => .ok .float64
+| _ => .error s!"Can't parse {s} as a dtype"
+
+def dtypeNameToNpyString (t : Dtype.Name) : String := match t with
+| .bool => "b1"
+| .int8 => "i1"
+| .int16 => "i2"
+| .int32 => "i4"
+| .int64 => "i8"
+| .uint8 => "u1"
+| .uint16 => "u2"
+| .uint32 => "u3"
+| .uint64 => "u4"
+| .float16 => "f2"
+| .float32 => "f4"
+| .float64 => "f8"
+
+def fromNpyString (s : String) : Err Dtype :=
+  if s.length == 0 then .error "Empty dtype string" else
+  do
+    let order <- ByteOrder.fromChar (s.get 0)
+    let name <- dtypeNameFromNpyString (s.drop 1)
+    return { name, order }
+
+def toNpyString (t : Dtype) : String := t.order.toChar.toString.append (dtypeNameToNpyString t.name)
+
+def itemsize (t : Dtype) := t.name.itemsize
+
+end Dtype
+
+/-!
+This is the header of the on-disk Numpy format, typically with the .npy file extension.
+
+https://numpy.org/doc/stable/reference/generated/numpy.lib.format.html#format-version-1-0
+-/
+structure Header where
+  major : UInt8 := 1
+  minor : UInt8 := 0
+  descr : Dtype
+  dataOrder : DataOrder := DataOrder.C
+  shape : Shape
+  deriving Repr, Inhabited
+
+namespace Header
+
+/-!
+A npy binary file has a header, some padding, then the data. This method computes the
+size of the data portion of the file.
+-/
+def dataSize (header : Header): Nat := header.descr.itemsize * header.shape.count
+
+end Header
+
+-- We generally have large tensors, so don't show them by default
+local instance ByteArrayRepr : Repr ByteArray where
   reprPrec x _ :=
     let s := toString x.size
     s!"ByteArray of size {s}"
 
-structure ParsingState where
+structure Ndarray where
+  header : Header
+  data : ByteArray
+  startIndex : Nat -- First byte of non-header data
+  deriving Repr, Inhabited
+
+def Ndarray.nbytes (x : Ndarray) : ℕ := x.header.descr.itemsize * x.header.shape.count
+
+section Parse
+
+private structure ParsingState where
   source : ByteArray    -- Source data being parsed
   index : Nat           -- Index into source data
   headerEnd : Nat
@@ -28,9 +149,9 @@ structure ParsingState where
   debug : List String
   deriving Repr
 
-abbrev PState (T : Type) := EStateM String ParsingState T
+private abbrev PState (T : Type) := EStateM String ParsingState T
 
-instance : MonadLiftT Err PState where
+private instance : MonadLiftT Err PState where
   monadLift x := match x with
   | .ok x => .ok x
   | .error x => .error x
@@ -46,7 +167,7 @@ private def debug (msg : String) : PState Unit := do
   modify (fun s => { s with debug := msg :: s.debug })
 
 -- Numpy disk format uses python convention for bools; True/False
-private def numpyBool (s: String): Err Bool := match s with
+private def npyBool (s: String): Err Bool := match s with
 | "True" => .ok true
 | "False" => .ok false
 | _ => .error s!"Can't parse {s} as Bool"
@@ -154,11 +275,11 @@ private def parseOneMetadata : PState Unit := do
   colon
   if id == "descr" then
     let v <- quoted parseToken
-    let d <- Dtype.fromString v
+    let d <- Dtype.fromNpyString v
     modify (fun s => { s with descr := some d })
   else if id == "fortran_order" then
     let v <- parseToken
-    let b <- liftM (numpyBool v)
+    let b <- liftM (npyBool v)
     modify (fun s => { s with fortranOrder := b })
   else if id == "shape" then
     let shape <- parseShape
@@ -177,27 +298,37 @@ private def parseMetadata : PState Unit := do
   ignore comma
   consume '}'
 
-private def parseNumpyRepr : PState NumpyRepr := do
+private def parseNpyRepr : PState Ndarray := do
   let (major, minor) <- parseHeader
   parseMetadata
   let (s : ParsingState) <- get
-  match s.descr, s.fortranOrder, s.shape with
-  | some descr, some fortranOrder, some shape =>
-    let header := NumpyHeader.mk major minor descr fortranOrder shape
-    let repr := { header, data := s.source, startIndex := s.headerEnd, endIndex := s.source.size }
+  match s.descr, s.shape with
+  | some descr, some shape =>
+    let order := match s.fortranOrder with
+    | .none => DataOrder.C
+    | .some b => if b then DataOrder.Fortran else DataOrder.C
+    let header := Header.mk major minor descr order shape
+    let repr := Ndarray.mk header s.source s.headerEnd
     return repr
-  | _, _, _ => .error "Can't parse a metadata value"
+  | _, _ => .error "Can't parse a metadata value"
 
-def parse (buffer : ByteArray) : Err NumpyRepr := do
+def parse (buffer : ByteArray) : Err Ndarray := do
   let init := ParsingState.mk buffer 0 0 none none none []
-  resultExcept $ parseNumpyRepr.run init
+  resultExcept $ parseNpyRepr.run init
 
-def parseFile (path: System.FilePath) : IO (Err NumpyRepr) := do
+def parseFile (path: System.FilePath) : IO Ndarray := do
   let buffer <- IO.FS.readBinFile path
-  return parse buffer
+  IO.ofExcept (parse buffer)
 
 end Parse
 
+/-
+Write ndarray to disk in .npy format
+
+Note that because the stride info is not saved, we may need a copy to save the array.
+For example, saving `np.arange(6)[::-1]` results in the bytes stored as
+05 04 03 02 01 00, which is a copy of the data, which is stored in the reverse order.
+-/
 section Save
 
 private def pushList (a : ByteArray) (xs : List UInt8) : ByteArray := a.append xs.toByteArray
@@ -215,26 +346,29 @@ private def headerSizeToBytes (n : Nat) : UInt8 × UInt8 :=
 private def next64 (n : Nat) : Nat := 64 - (n % 64)
 
 -- Can we do this with local mutation?
-private def toByteArray! (repr : NumpyRepr) : ByteArray :=
+private def Ndarray.toByteArray! (arr : Ndarray) : ByteArray :=
   let a := ByteArray.empty.push 0x93
   let a := pushString a "NUMPY"
-  let a := pushList a [repr.header.major, repr.header.minor]
+  let a := pushList a [arr.header.major, arr.header.minor]
   let a := (a.push 0).push 0 -- index 8, 9. We will clobber this with the header size in a moment
   if a.size != 10 then panic s!"Bad header size: {a.size}, should be 9" else
+  let order := match arr.header.dataOrder with
+  | .Fortran => true
+  | .C => false
   let a := pushStrings a [
     "{'descr': '",
-    repr.header.descr.toString,
+    arr.header.descr.toNpyString,
     "', 'fortran_order': ",
-    boolString repr.header.fortranOrder,
+    boolString order,
     ", 'shape': (",
   ]
-  let shape := repr.header.shape
+  let shape := arr.header.shape
   let a := if H : shape.isEmpty then a else
     let ok : shape ≠ [] := by
       simp at H
       exact H
     let a := pushString a (toString (shape.head ok))
-    repr.header.shape.tail.foldl (fun a d => pushString (pushString a ", ") (toString d)) a
+    arr.header.shape.tail.foldl (fun a d => pushString (pushString a ", ") (toString d)) a
   let a := pushString a "), }"
   -- We need the header to be aligned
   let padding := 64 - (a.size % 64) - 1 -- -1 for the terminal '\n'
@@ -244,60 +378,14 @@ private def toByteArray! (repr : NumpyRepr) : ByteArray :=
   let (low, hi) := headerSizeToBytes (a.size - 10)
   let a := a.set! 8 low
   let a := a.set! 9 hi
-  let data' := repr.data.copySlice repr.startIndex ByteArray.empty 0 repr.nbytes
+  -- TODO: Do a copy if the data is not forward and contiguous
+  let data' := arr.data.copySlice arr.startIndex ByteArray.empty 0 arr.nbytes
   a.append data'
 
-def save! (repr : NumpyRepr) (file : System.FilePath) : IO Unit :=
-  IO.FS.writeBinFile file repr.toByteArray!
+def save! (arr : Ndarray) (file : System.FilePath) : IO Unit :=
+  IO.FS.writeBinFile file arr.toByteArray!
 
 end Save
 
-section Test
-
-private def DEBUG := false
-private def debugPrint {a : Type} [Repr a] (s : a) : IO Unit := if DEBUG then IO.print (Std.Format.pretty (repr s)) else return ()
-private def debugPrintln {a : Type} [Repr a] (s : a) : IO Unit := do
-  debugPrint s
-  if DEBUG then IO.print "\n" else return ()
-
--- Caller must remove the temp file
-private def saveNumpyArray (expr : String) : IO System.FilePath := do
-  let (_root_, file) <- IO.FS.createTempFile
-  let expr := s!"import numpy as np; x = {expr}; np.save('{file}', x)"
-  let output <- IO.Process.output { cmd := "/usr/bin/env", args := ["python3", "-c", expr].toArray }
-  let _ <- debugPrintln output.stdout
-  let _ <- debugPrintln output.stderr
-  -- `np.save` appends `.npy` to the file
-  return file.addExtension "npy"
-
-private def testTensorElementBV (n : Nat) [TensorElement (BitVec n)] (dtype : String) : IO Bool := do
-  let file <- saveNumpyArray s!"np.arange(20, dtype='{dtype}').reshape(5, 4)"
-  let arr <- Parse.parseFile file
-  let _ <- debugPrintln file
-  let _ <- debugPrintln arr
-  let _ <- IO.FS.removeFile file
-  let expected : List (BitVec n) := List.range 20
-  let actual := arr.bind (fun arr => do
-    let rev <- Nat.foldM (fun i acc => (Index.getPosition arr i).map (fun i => i :: acc)) [] 20
-    return rev.reverse
-  )
-  let _ <- debugPrintln actual
-  match actual with
-  | .error _ => return false
-  | .ok actual => return expected == actual
-
--- TODO: Asserting true/false here would be great
-#eval testTensorElementBV 16 "uint16" -- expect true
-#eval testTensorElementBV 32 "uint16" -- expect false
-#eval testTensorElementBV 64 "uint16" -- expect false
-#eval testTensorElementBV 16 "uint32" -- expect false
-#eval testTensorElementBV 32 "uint32" -- expect true
-#eval testTensorElementBV 64 "uint32" -- expect false
-#eval testTensorElementBV 16 "uint64" -- expect false
-#eval testTensorElementBV 32 "uint64" -- expect false
-#eval testTensorElementBV 64 "uint64" -- expect true
-
-end Test
-
-end NumpyRepr
+end Npy
 end TensorLib

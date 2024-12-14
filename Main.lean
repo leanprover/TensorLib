@@ -15,7 +15,7 @@ def format (p : Parsed) : IO UInt32 := do
   let shape : List Nat := (p.variableArgsAs! Nat).toList
   let n := shape.prod
   IO.println s!"Got shape {shape}"
-  let range := NumpyRepr.TensorElement.arange BV16 n
+  let range := Tensor.Element.arange BV16 n
   let v := range.reshape! shape
   let s := Format.reprToString BV16 v
   IO.println s

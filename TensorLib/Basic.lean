@@ -4,9 +4,12 @@ Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Jean-Baptiste Tristan, Paul Govereau, Sean McLaughlin
 -/
 
-import TensorLib.NumpyRepr
-import TensorLib.Parse
-import TensorLib.Format
-import TensorLib.Slice
-import TensorLib.Indexing
-import TensorLib.Ufunc
+import TensorLib.Common
+import TensorLib.Dtype
+import TensorLib.Tensor
+import TensorLib.Npy
+
+-- import TensorLib.Format
+-- import TensorLib.Slice
+-- import TensorLib.Indexing
+-- import TensorLib.Ufunc
