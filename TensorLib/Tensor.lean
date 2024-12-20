@@ -84,15 +84,28 @@ need this info, but for now we will copy whenever we update the array.
 -- TODO: Do we want this to be inductive to handle array scalars? https://numpy.org/doc/stable/reference/arrays.scalars.html#arrays-scalars
 --       Will force those into this type for now, but it seems wasteful.
 --       NumPy has a bunch of special handling for array scalars.
+-- TODO: I'm really not sure what to do with the data order here. Logically, the strides are
+--       enough to navigate the tensor. E.g. x.T just reverses the strides, and everything works fine.
+--       NumPy though, swaps the data order flag during a transpose as well. It is used for optimizations,
+--       especially avoiding copies. We should get a good handle on this logic and either properly use
+--       the data order field or remove it entirely.
+
 structure Tensor where
   dtype : Dtype
-  dataOrder : DataOrder := DataOrder.C
+  -- `dataOrder` is private because it's not currently being used. It is not removed because is a fixture
+  -- in NumPy and we'll likely need it for even small improvements to our logic of when to copy or not.
+  private dataOrder : DataOrder := DataOrder.C
   shape : Shape
   data : ByteArray
   startIndex : Nat := 0 -- Pointer to the first byte of ndarray data. This is implicit in the `data` pointer in numpy.
   unitStrides : Strides := shape.unitStrides dataOrder
   deriving Repr, Inhabited
 namespace Tensor
+
+/-!
+An tensor is trivially reshapable if it is contiguous with non-negative strides.
+-/
+def isTriviallyReshapable (arr : Tensor) : Bool := arr.unitStrides == arr.shape.unitStrides arr.dataOrder
 
 private def dtypeOfNpy (dtype : Npy.Dtype) : Err Dtype := do
   let order <- match dtype.order with
@@ -190,15 +203,43 @@ def copy (arr : Tensor) : Tensor := Id.run do
   }
   return arr
 
+/-
+Reshaping is surprisingly tricky. These are the main methods in NumPy.
+
+  https://github.com/numpy/numpy/blob/main/numpy/_core/src/multiarray/shape.c#L187-L189
+  https://github.com/numpy/numpy/blob/main/numpy/_core/src/multiarray/shape.c#L195-L197
+  https://github.com/numpy/numpy/blob/main/numpy/_core/src/multiarray/shape.c#L347
+    let olds := x.shape
+
+It's a couple hundred lines of C code with many corner cases. For example, it gets
+hard when the array is already a view, especially one that is already non-contiguous.
+If the array is contiguous, and strides are positive, things are much easier;
+we can just write down the new shape and compute the new strides. Things that complicate
+the picture, and require all the logic in the code above:
+
+1. Axes of size 1 have a non-0 stride, but it shouldn't be used in new stride calculations.
+2. If the array is not contiguous, e.g. created with a non-unit `step` in a slice, we
+   may or may not be able to represent it without copying.
+3. Even if the array is contiguous, with negative strides, e.g. created with a negative `step` in a slice, we
+   may or may not be able to represent it without copying. For example, if some strides are positive and
+   some are negative, it can require a copy to reshape.
+4. Data ordering (C vs Fortran, row major vs column major) goes into the calculation of whether an array
+   is contiguous or not. The same strides on the same data can be contiguous or not depending on the data ordering.
+-/
 def copyAndReshape (arr : Tensor) (shape : Shape) : Err Tensor :=
   if arr.shape.prod != shape.prod then .error "Incompatible shapes" else
   let arr := arr.copy
   .ok { arr with shape, unitStrides := shape.unitStrides arr.dataOrder }
 
+def reshape (arr : Tensor) (shape : Shape) : Err Tensor :=
+  if arr.isTriviallyReshapable
+  then .ok { arr with shape, unitStrides := shape.unitStrides arr.dataOrder }
+  else copyAndReshape arr shape
+
+def reshape! (arr : Tensor) (shape : Shape) : Tensor := get! $ reshape arr shape
+
 private def copyAndReshape! (arr : Tensor) (shape : Shape) : Tensor :=
-  match copyAndReshape arr shape with
-  | .error msg => panic! msg
-  | .ok v => v
+  get! (copyAndReshape arr shape)
 
 class Element (a : Type) where
   dtype : Dtype
@@ -302,7 +343,7 @@ open Std.Format
 private inductive Tree a where
 | root (xs: List a)
 | node (xs: List (Tree a))
-deriving BEq, Repr
+deriving BEq, Repr, Inhabited
 
 private def toTree {a : Type} (x : List a) (strides : Strides) : Err (Tree a) :=
   if strides.any fun x => x <= 0 then .error "strides need to be positive" else
@@ -349,9 +390,12 @@ private def formatTree [Repr a] (t : Tree a) (shape : Shape) : Err Std.Format :=
 
 end Format
 
-def format (a : Type) [Repr a] [Element a] (x : Tensor) : Err Std.Format := do
+def toTree (a : Type) [Repr a] [Element a] (x : Tensor) : Err (Format.Tree a) := do
   let xs <- Element.toList a x
-  let t <- Format.toTree xs x.unitStrides
+  Format.toTree xs x.unitStrides
+
+def format (a : Type) [Repr a] [Element a] (x : Tensor) : Err Std.Format := do
+  let t <- toTree a x
   let f <- Format.formatTree t x.shape
   return f
 
@@ -359,14 +403,20 @@ def str (a : Type) [Repr a] [Tensor.Element a] (x : Tensor) : String := match fo
 | .error err => s!"Error: {err}"
 | .ok s => Std.Format.pretty s 120
 
+section Test
+
 #guard str BV8 (Element.arrayScalar (5 : BV8)) == "array(0x05#8)"
 #guard str BV8 (Element.arange BV8 10) == "array([0x00#8, 0x01#8, 0x02#8, 0x03#8, 0x04#8, 0x05#8, 0x06#8, 0x07#8, 0x08#8, 0x09#8])"
 
-section Test
+private def arr0 := Element.arange BV8 8
+#guard get! ((arr0.copyAndReshape! [2, 4]).toTree BV8) == .node [.root [0, 1, 2, 3], .root [4, 5, 6, 7]]
+#guard get! ((arr0.copyAndReshape! [1, 2, 4]).toTree BV8) == .node [.node [.root [0, 1, 2, 3], .root [4, 5, 6, 7]]]
 
-private def arr0 := Element.arange BV8 10
-#eval (arr0.copyAndReshape! [2, 5]).str BV8
+private def arr1 := Element.arange BV8 12
+#guard get! ((arr1.copyAndReshape! [2, 6]).toTree BV8) == .node [.root [0, 1, 2, 3, 4, 5], .root [6, 7, 8, 9, 10, 11]]
+#guard get! ((arr1.copyAndReshape! [2, 3, 2]).toTree BV8) == .node [.node [.root [0, 1], .root [2, 3], .root [4, 5]], .node [.root [6, 7], .root [8, 9], .root [10, 11]]]
 
 end Test
+
 end Tensor
 end TensorLib

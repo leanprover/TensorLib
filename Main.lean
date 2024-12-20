@@ -6,7 +6,6 @@ Authors: Jean-Baptiste Tristan, Paul Govereau, Sean McLaughlin
 import Cli
 import Init.System.IO
 import TensorLib
-import TensorLib.Format
 
 open Cli
 open TensorLib
@@ -17,7 +16,7 @@ def format (p : Parsed) : IO UInt32 := do
   IO.println s!"Got shape {shape}"
   let range := Tensor.Element.arange BV16 n
   let v := range.reshape! shape
-  let s := Format.reprToString BV16 v
+  let s := v.format BV16
   IO.println s
   return 0
 
@@ -32,19 +31,14 @@ def formatCmd := `[Cli|
 def parseNpy (p : Parsed) : IO UInt32 := do
   let file := p.positionalArg! "input" |>.as! String
   IO.println s!"Parsing {file}..."
-  let v <- NumpyRepr.Parse.parseFile file
-  match v with
-  | .error msg =>
-    IO.println s!"Couldn't parse {file}: {msg}"
-    return 1
-  | .ok r => do
-    IO.println (repr r)
-    if p.hasFlag "write" then do
-      let new := (System.FilePath.mk file).addExtension "new"
-      IO.println s!"Writing copy to {new}"
-      let _ <- NumpyRepr.save! r new
-    return 0
-
+  let v <- Npy.parseFile file
+  IO.println (repr v)
+  if p.hasFlag "write" then do
+    let new := (System.FilePath.mk file).addExtension "new"
+    IO.println s!"Writing copy to {new}"
+    let _ <- v.save! new
+    -- TensorLib.Npy.save! (arr : Ndarray) (file : System.FilePath) : IO Unit
+  return 0
 
 def parseNpyCmd := `[Cli|
   "parse-npy" VIA parseNpy;

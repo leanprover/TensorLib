@@ -124,9 +124,7 @@ def build (start stop step : Option Int) : Err Slice :=
     .ok (Slice.mk start stop step stepNz)
 
 private partial def build! (start stop step : Option Int) : Slice :=
-  match build start stop step with
-  | .error msg => panic! msg
-  | .ok s => s
+  get! (build start stop step)
 
 def dir (s : Slice): Dir := match s.step with
   | .none => Dir.Forward
@@ -189,18 +187,18 @@ theorem stopRange (s : Slice) (n : Nat) :
       all_goals simp [H]
       by_cases H1 : k < 0
       . simp [H, H1]
-        aesop
+        simp_all only [not_lt, ↓reduceIte]
         all_goals omega
-      . aesop
+      . aesop (config := { warnOnNonterminal := false })
         all_goals omega
     . simp
       by_cases H : k < -n
       all_goals simp [H]
       by_cases H1 : k < 0
       . simp [H, H1]
-        aesop
+        aesop (config := { warnOnNonterminal := false })
         all_goals omega
-      . aesop
+      . aesop (config := { warnOnNonterminal := false })
         all_goals omega
 
 theorem stopForward (s : Slice) (dim : Nat) (H : s.dir = .Forward) : (s.stopOrDefault dim).isSome := by

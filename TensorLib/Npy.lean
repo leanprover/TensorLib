@@ -382,10 +382,10 @@ private def Ndarray.toByteArray! (arr : Ndarray) : ByteArray :=
   let data' := arr.data.copySlice arr.startIndex ByteArray.empty 0 arr.nbytes
   a.append data'
 
-def save! (arr : Ndarray) (file : System.FilePath) : IO Unit :=
-  IO.FS.writeBinFile file arr.toByteArray!
-
 end Save
+
+def Ndarray.save! (arr : Ndarray) (file : System.FilePath) : IO Unit :=
+  IO.FS.writeBinFile file arr.toByteArray!
 
 end Npy
 end TensorLib

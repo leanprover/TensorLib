@@ -6,6 +6,10 @@ namespace TensorLib
 --! The error monad for TensorLib
 abbrev Err := Except String
 
+def get! [Inhabited a] (x : Err a) : a := match x with
+| .error msg => panic msg
+| .ok x => x
+
 def dot [Add a][Mul a][Zero a] (x y : List a) : a := (x.zip y).foldl (fun acc (a, b) => acc + a * b) 0
 
 instance [BEq a] : BEq (Err a) where
@@ -218,27 +222,6 @@ def allDimIndices (shape : Shape) : List DimIndex :=
 
 end Shape
 
-structure NatIter where
-  max : Nat
-  curr : Nat := 0
-
-namespace NatIter
-
-def hasNext (n : NatIter) : Bool := n.curr < n.max
-def next (n : NatIter) : Nat × NatIter := (n.curr, { n with curr := n.curr + 1 })
-def reset (n : NatIter) : NatIter := { n with curr := 0 }
-
-private partial def toList (n : NatIter) : List Nat :=
-  let rec loop (acc : List Nat) (n : NatIter) : List Nat :=
-    if !n.hasNext then acc.reverse else
-    let (k, n) := n.next
-    loop (k :: acc) n
-  loop [] n
-
-#guard (NatIter.mk 6 0).toList == [0, 1, 2, 3, 4, 5]
-
-end NatIter
-
 /-
 We store the upper limits backwards so we can have access to the one moving
 fastest at the left of the list. Because this could cause confusion, we make
@@ -266,17 +249,8 @@ namespace DimsIter
 -- 0th value (all 0s)
 def size (iter : DimsIter) : Nat := iter.dims.prod
 
--- def make (dims : List Nat) : Err DimsIter :=
---   if dims.isEmpty || dims.any fun k => k == 0
---   then .error "Limits must be nonempty and non-0"
---   else .ok $ DimsIter.mk dims.reverse (List.replicate dims.length 0)
-
 def make (dims : List Nat) : DimsIter :=
   DimsIter.mk dims.reverse (List.replicate dims.length 0)
-
--- private def make! (dims : List Nat) : DimsIter := match make dims with
--- | .ok x => x
--- | .error msg => panic! msg
 
 private def make! (dims : List Nat) : DimsIter := make dims
 
