@@ -6,6 +6,8 @@ namespace TensorLib
 --! The error monad for TensorLib
 abbrev Err := Except String
 
+def dot [Add a][Mul a][Zero a] (x y : List a) : a := (x.zip y).foldl (fun acc (a, b) => acc + a * b) 0
+
 instance [BEq a] : BEq (Err a) where
   beq x y := match x, y with
   | .ok x, .ok y => x == y
@@ -196,13 +198,13 @@ def positionToDimIndex (strides : Strides) (n : Position) : DimIndex :=
   idx.reverse
 
 -- One-based strides
-def dot [Add a][Mul a][Zero a] (x y : List a) : a := (x.zip y).foldl (fun acc (a, b) => acc + a * b) 0
 def dimIndexToOffset (strides : Strides) (index : DimIndex) : Offset := dot strides index
 
 #guard positionToDimIndex [3, 1] 4 == [1, 1]
 #guard dimIndexToOffset [3, 1] [1, 1] == 4
 
--- TODO: Make an iterator here rather than constructing the lists
+-- In general you should use DimIter instead of this, which is equivalent
+-- to `DimIter.toList` but I left it here because it is obviously terminating.
 def allDimIndices (shape : Shape) : List DimIndex :=
   let strides := unitStrides shape DataOrder.C
   let count := shape.count
@@ -239,7 +241,8 @@ end NatIter
 
 /-
 We store the upper limits backwards so we can have access to the one moving
-fastest at the left of the list.
+fastest at the left of the list. Because this could cause confusion, we make
+the constructor and fields private.
 
 `curr` has not yet been returned by `next`
 
@@ -247,31 +250,41 @@ Invariant: `hasNext` iff all elements of `curr` are < the corresponding element 
 The signal to stop is when the last element of `curr` is equal to the last element of `max`
 
 TODO: Could possibly use a Nat "count" field here to prove termination of
-some functions that use this, e.g. `toList`. `next` would decrement the counter, that begins
-at the product of the indices.
+some functions that use this, e.g. `toList`. `next` would start at `size` and decrement the counter,
+that begins at the product of the indices.
 -/
 structure DimsIter where
   private mk ::
-  dims : List Nat
+  private dims : List Nat
   private curr : List Nat
 deriving Inhabited
 -- max.length = cur.length
 
 namespace DimsIter
 
-def make (dims : List Nat) : Err DimsIter :=
-  if dims.isEmpty || dims.any fun k => k == 0
-  then .error "Limits must be nonempty and non-0"
-  else .ok $ DimsIter.mk dims.reverse (List.replicate dims.length 0)
+--! Total number of elements in the iterator, assuming we begin at the
+-- 0th value (all 0s)
+def size (iter : DimsIter) : Nat := iter.dims.prod
 
-private def make! (max : List Nat) : DimsIter := match make max with
-| .ok x => x
-| .error msg => panic! msg
+-- def make (dims : List Nat) : Err DimsIter :=
+--   if dims.isEmpty || dims.any fun k => k == 0
+--   then .error "Limits must be nonempty and non-0"
+--   else .ok $ DimsIter.mk dims.reverse (List.replicate dims.length 0)
+
+def make (dims : List Nat) : DimsIter :=
+  DimsIter.mk dims.reverse (List.replicate dims.length 0)
+
+-- private def make! (dims : List Nat) : DimsIter := match make dims with
+-- | .ok x => x
+-- | .error msg => panic! msg
+
+private def make! (dims : List Nat) : DimsIter := make dims
 
 /-
 This is trickier than I would like. The final value is
 [dim0-1, dim1-1, dim2-1, ..., dimN-1], but it hasn't been
-returned yet. To signal we are done, we'll put the
+returned yet. To signal we are done, we'll set the final value
+to dimN.
 -/
 def hasNext (iter : DimsIter) : Bool :=
   let rec loop (dims ns : List Nat) : Bool :=
@@ -291,23 +304,54 @@ def next (iter : DimsIter) : List Nat × DimsIter :=
   -- Invariant: `acc` is a list of 0s, so doesn't need to be reversed
   let rec loop (acc ms ns : List Nat) : List Nat :=
     match ms, ns with
-    | [_dim], [n] => ((n + 1) :: acc).reverse
-    | m :: ms, n :: ns =>
-      if n < m - 1 then ((n + 1) :: acc).reverse.append ns
-      else loop (0 :: acc) ms ns
+      -- this case is to bump the final value to _dim, rather than _dim - 1 which
+      -- is the highest the other indexes get
+    | [_dim], [n] =>
+      ((n + 1) :: acc).reverse
+    | dim :: dims, n :: ns =>
+      if n < dim - 1 then ((n + 1) :: acc).reverse.append ns
+      else loop (0 :: acc) dims ns
     | _, _ => [] -- Impossible if `iter.hasNext = true`
   let curr' := loop [] iter.dims iter.curr
   (iter.curr.reverse, { iter with curr := curr' })
 
-private partial def toList (n : DimsIter) : List (List Nat) :=
-  let rec loop (acc : List (List Nat)) (n : DimsIter) : List (List Nat) :=
-    if !n.hasNext then acc.reverse else
-    let (k, n) := n.next
-    loop (k :: acc) n
-  loop [] n
+instance [Monad m] : ForM m DimsIter (List Nat) where
+  forM iter f := do
+    let mut iter := iter
+    for _ in [0:iter.size] do
+      let (dims, iter') := iter.next
+      iter := iter'
+      f dims
 
-#guard !(DimsIter.make [0, 1]).isOk
-#guard !(DimsIter.make [1, 0]).isOk
+instance [Monad m] : ForIn m DimsIter (List Nat) where
+  forIn {α} [Monad m] (iter : DimsIter) (x : α) (f : List Nat -> α -> m (ForInStep α)) : m α := do
+    let mut iter := iter
+    let mut res := x
+    for _ in [0:iter.size] do
+      let (dims, iter') := iter.next
+      iter := iter'
+      let res' <- f dims res
+      match res' with
+      | .yield k
+      | .done k => res := k
+    return res
+
+#guard [[0, 0], [0, 1], [1, 0], [1, 1]] =
+      let iter := DimsIter.make [2, 2]
+      Id.run do
+        let mut xs := []
+        for x in iter do
+          xs := x :: xs
+        return xs.reverse
+
+def toList (iter : DimsIter) : List (List Nat) := Id.run do
+  let mut res := []
+  for xs in iter do
+    res := xs :: res
+  return res.reverse
+
+#guard (DimsIter.make [0, 1] ).toList == []
+#guard (DimsIter.make [1, 0]).toList == []
 #guard (DimsIter.make! [1]).toList == [[0]]
 #guard (DimsIter.make! [3]).toList == [[0], [1], [2]]
 #guard (DimsIter.make! [1, 1]).toList == [[0, 0]]

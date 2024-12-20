@@ -6,8 +6,8 @@ namespace TensorLib
 
 local instance ByteArrayRepr : Repr ByteArray where
   reprPrec x _ :=
-    let s := toString x.size
-    s!"ByteArray of size {s}"
+    if x.size < 100 then x.toList.repr 100 else
+    s!"ByteArray of size {x.size}"
 
 /-!
 A Tensor is the data bytes, along with all metadata required to do
@@ -92,7 +92,6 @@ structure Tensor where
   startIndex : Nat := 0 -- Pointer to the first byte of ndarray data. This is implicit in the `data` pointer in numpy.
   unitStrides : Strides := shape.unitStrides dataOrder
   deriving Repr, Inhabited
-
 namespace Tensor
 
 private def dtypeOfNpy (dtype : Npy.Dtype) : Err Dtype := do
@@ -152,8 +151,51 @@ def itemsize (x : Tensor) : ℕ := x.dtype.itemsize
 --! byte-strides
 def strides (x : Tensor) : Strides := x.unitStrides.map (fun v => x.itemsize * v)
 
+--! Get the offset corresponding to a DimIndex
+def dimIndexToOffset (x : Tensor) (i : DimIndex) : Int :=
+  Shape.dimIndexToOffset x.strides i
+
+--! Get the starting byte corresponding to a DimIndex
+def dimIndexToPosition (x : Tensor) (i : DimIndex) : Nat :=
+  (x.dimIndexToOffset i).toNat
+
 --! number of bytes representing the entire tensor
 def nbytes (x : Tensor) : ℕ := x.itemsize * x.size
+
+def pr [H : Repr a] (x : a) : String := (H.reprPrec x 100).pretty
+
+/-!
+Copy a Tensor's data to new, contiguous storage.
+
+Note that this doesn't just do a `ByteArray` copy. It walks over `arr` according
+to its strides and selects the elements, so it works on views of other tensors with
+non-contiguous data.
+-/
+def copy (arr : Tensor) : Tensor := Id.run do
+  let itemsize := arr.dtype.itemsize
+  let mut data := ByteArray.mkEmpty arr.nbytes
+  let iter := DimsIter.make arr.shape
+  for dimIndex in iter do
+    let posn := arr.dimIndexToPosition dimIndex
+    for j in [0:itemsize] do
+      let b := arr.data.get! (posn + j)
+      -- Leaving this here for posterity. Random access `set!` doesn't work on
+      -- arrays created using `ByteArray.empty`, even if the initial size is greater
+      -- than the argument to `set!`. It just quietly does nothing.
+      -- data := data.set! i b
+      data := data.push b
+  let arr := {
+     dtype := arr.dtype,
+     dataOrder := arr.dataOrder,
+     shape := arr.shape,
+     data
+  }
+  return arr
+
+def copyAndReshape (arr : Tensor) (shape : Shape) : Err Tensor :=
+  if arr.shape.prod != shape.prod then .error "Incompatible shapes" else
+  let arr := arr.copy
+  .ok { arr with shape, unitStrides := shape.unitStrides arr.dataOrder }
 
 
 class Element (a : Type) where
@@ -178,6 +220,33 @@ def arange (a : Type) [w : Element a] (n : Nat) : Tensor :=
     ByteArray.copySlice bytes 0 data (i * w.itemsize) w.itemsize
   let data := Nat.fold foldFn n data
   { dtype := w.dtype, shape := [n], data }
+
+-- This is a blind index into the array, disregarding the shape.
+def getPosition [typ : Element a] (x : Tensor) (position : ℕ) : Err a :=
+  if typ.itemsize != x.itemsize then .error "byte size mismatch" else -- TODO: Lift this check out so we only do it once
+  typ.fromByteArray x.data (x.startIndex + (position * typ.itemsize))
+
+def setPosition [typ : Element a] (x : Tensor) (n : ℕ) (v : a): Err Tensor :=
+  let itemsize := typ.itemsize
+  if itemsize != x.itemsize then .error "byte size mismatch" else -- TODO: Lift this check out so we only do it once
+  let bytes := typ.toByteArray v
+  let posn := n * itemsize
+  .ok { x with data := bytes.copySlice 0 x.data posn itemsize true }
+
+-- Since the DimIndex is independent of the dtype size, we need to recompute the strides
+-- TODO: Would be better to not recompute this over and over. We should find a place to store
+-- the 1-based default strides
+def getDimIndex [Element a] (x : Tensor) (index : DimIndex) : Err a :=
+  let offset := Shape.dimIndexToOffset x.unitStrides index
+  let posn := x.startIndex + offset
+  if posn < 0 then .error s!"Illegal position: {posn}"
+  else getPosition x posn.toNat
+
+def setDimIndex [Element a] (x : Tensor) (index : DimIndex) (v : a): Err Tensor :=
+  let offset := Shape.dimIndexToOffset x.unitStrides index
+  let posn := x.startIndex + offset
+  if posn < 0 then .error s!"Illegal position: {posn}"
+  else setPosition x posn.toNat v
 
 instance BV8Native : Element BV8 where
   dtype := Dtype.mk .uint8 .oneByte
@@ -208,6 +277,13 @@ instance BV64Little : Element BV64 where
   fromByteArray arr startIndex := ByteArray.toBV64 arr startIndex .littleEndian
 
 #guard (arange BV16 10).size == 10
+
+section Test
+
+private def x := arange BV8 6
+#eval x.copy
+
+end Test
 
 end Element
 end Tensor

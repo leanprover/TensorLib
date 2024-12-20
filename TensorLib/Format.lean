@@ -4,7 +4,6 @@ import TensorLib.Indexing
 namespace TensorLib
 namespace Format
 
--- open TensorLib.NumpyRepr
 open Std.Format
 
 -- TODO: remove `Err` by proving all indices are within range

@@ -1,3 +1,4 @@
+import TensorLib.Common
 import TensorLib.Tensor
 import TensorLib.Slice
 import TensorLib.Npy
@@ -14,52 +15,15 @@ Theorems to prove:
 namespace TensorLib
 namespace Index
 
--- Indexing utility
-private def start (strides : Strides) (index : DimIndex) : Err ℕ :=
-  match strides, index with
-  | [], [] => .error "Can not index with empty list"
-  | [], _ :: _ | _ :: _, [] => .error "Unequal lengths: strides and index"
-  | stride :: strides, i :: index => (start strides index).map fun x => (x + i * stride).toNat
-
 -- Get a single value from the tensor.
 -- TODO: Replace get! with the Fin version. I tried this for a couple hours
 -- and failed.
-private def getBytes! (x : Tensor) (index : DimIndex) : Err (List UInt8) := do
-  let gap <- start x.strides index
-  let i := x.startIndex + gap
-  let rec loop (n : ℕ) (acc : List UInt8) : List UInt8 :=
-    match n with
-    | 0 => acc
-    | n + 1 => loop n (x.data.get! (i + n) :: acc)
-  return loop x.itemsize []
-
-
--- This is a blind index into the array, disregarding the shape.
-def getPosition [typ : Tensor.Element a] (x : Tensor) (position : ℕ) : Err a :=
-  if typ.itemsize != x.itemsize then .error "byte size mismatch" else -- TODO: Lift this check out so we only do it once
-  typ.fromByteArray x.data (x.startIndex + (position * typ.itemsize))
-
-def setPosition [typ : Tensor.Element a] (x : Tensor) (n : ℕ) (v : a): Err Tensor :=
-  let itemsize := typ.itemsize
-  if itemsize != x.itemsize then .error "byte size mismatch" else -- TODO: Lift this check out so we only do it once
-  let bytes := typ.toByteArray v
-  let posn := n * itemsize
-  .ok { x with data := bytes.copySlice 0 x.data posn itemsize true }
-
--- Since the DimIndex is independent of the dtype size, we need to recompute the strides
--- TODO: Would be better to not recompute this over and over. We should find a place to store
--- the 1-based default strides
-def getDimIndex [Tensor.Element a] (x : Tensor) (index : DimIndex) : Err a :=
-  let offset := Shape.dimIndexToOffset x.unitStrides index
-  let posn := x.startIndex + offset
-  if posn < 0 then .error s!"Illegal position: {posn}"
-  else getPosition x posn.toNat
-
-def setDimIndex [Tensor.Element a] (x : Tensor) (index : DimIndex) (v : a): Err Tensor :=
-  let offset := Shape.dimIndexToOffset x.unitStrides index
-  let posn := x.startIndex + offset
-  if posn < 0 then .error s!"Illegal position: {posn}"
-  else setPosition x posn.toNat v
+-- private def getBytes! (x : Tensor) (index : DimIndex) : List UInt8 := Id.run do
+--   let gap := (dot x.strides index).toNat
+--   let mut res : List UInt8 := []
+--   for i in [0:x.startIndex + gap] do
+--     res := res.push (x.data.get! (i + n))
+--   return res
 
 -- Parsed form. We will simplify some of the redundancy here to yield an Index.Basic
 -- In NumPy there may only be a single ellipsis present.
