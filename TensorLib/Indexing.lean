@@ -15,16 +15,6 @@ Theorems to prove:
 namespace TensorLib
 namespace Index
 
--- Get a single value from the tensor.
--- TODO: Replace get! with the Fin version. I tried this for a couple hours
--- and failed.
--- private def getBytes! (x : Tensor) (index : DimIndex) : List UInt8 := Id.run do
---   let gap := (dot x.strides index).toNat
---   let mut res : List UInt8 := []
---   for i in [0:x.startIndex + gap] do
---     res := res.push (x.data.get! (i + n))
---   return res
-
 -- Parsed form. We will simplify some of the redundancy here to yield an Index.Basic
 -- In NumPy there may only be a single ellipsis present.
 inductive NumpyItem where
@@ -53,40 +43,81 @@ inductive Item where
 
 abbrev Basic := List Item
 
+-- Return the basic index along with the shape that will result from the indexing
+def toBasic (items : NumpyBasic) (shape : Shape) : Err (Basic × Shape) := do
+  if 1 < items.count .ellipsis then .error "Index can contain at most one ellipsis" else .ok ()
+  if shape.length < items.length then .error "Too many indices" else .ok ()
+  match items, shape with
+  | [], shape => .ok ([], shape)
+  | .int n :: items, dim :: shape => do
+    -- Use a slice to do the finicky conversion to a position in the array
+    let slice <- Slice.build (.some n) .none .none
+    let n := slice.startOrDefault dim
+    let (rest, shape) <- toBasic items shape
+     -- Nat indexes drop the axis
+    .ok (Item.nat n :: rest, shape)
+  | .slice slice :: items, dim :: shape => do
+    let (rest, shape) <- toBasic items shape
+    .ok (Item.slice slice :: rest, slice.size dim :: shape)
+  | .newaxis :: items, dim :: shape => do
+    let (rest, shape) <- toBasic items (dim :: shape)
+    .ok (Item.newaxis :: rest, 1 :: shape)
+  | .ellipsis :: items, dim :: shape => do
+    if items.length == 1 + shape.length then
+      toBasic items (dim :: shape)
+    else -- there are fewer items than the shape
+      let (index, shape) <- toBasic (.ellipsis :: items) shape
+      return (index, dim :: shape)
+  | _, _ => .error "impossible"
+
+  -- All lists stored backwards, so make it hard to get at them
+  structure BasicIter where
+    private mk ::
+    private shape : Shape -- Shape of the input array
+    private basic : Basic -- Basic index
+    private curr : List Nat -- Current position in the iteration
+
+  namespace BasicIter
+
+  private def init (shape : Shape) (basic : Basic) : List Nat := match shape, basic with
+  | _ :: shape, .nat n :: basic => n :: init shape basic
+  | dim :: shape, .slice slice :: basic  => slice.startOrDefault dim :: init shape basic
+  | _ :: shape, .newaxis :: basic => 0 :: init shape basic
+  | _, _ => []
+
+  def make (shape : Shape) (basic : Basic) : BasicIter :=
+    let s := shape.reverse
+    let b := basic.reverse
+    let c := init s b
+    BasicIter.mk s b c
+
+  def next (iter : BasicIter) : List Nat × BasicIter :=
+    let rec loop (curr : List Nat) (basic : Basic) : List Nat := match curr, basic with
+    | _ :: curr, Item.nat m :: basic => m :: next
+    | _, _ => []
+    let curr := loop iter.curr iter.basic
+    { iter with curr }
+  end BasicIter
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 structure Reshape where
   shape : Shape
   strides : Strides
   startPosition : ℕ
   -- TODO H : shape.length == strides.length
-
 namespace Reshape
-
-def checked (shape : Shape) (strides : Strides) (startPosition : ℕ) : Err Reshape :=
-  if shape.length != strides.length then .error "Shape/Stride mismatch"
-  else .ok { shape, strides, startPosition }
-
-/-
-TODO: reshapes can require a copy. For example, when we get the data out of order via
-reverses and reshapes, flattening it again will require a copy.
-
-# x = np.arange(6)
-
-# x.reshape(3, 2).base is x
-True
-
-# x.reshape(3, 2)[::-1].base is x
-True
-
-# x.reshape(3, 2)[::-1].reshape(6)
-array([4, 5, 2, 3, 0, 1])
-
-# x.reshape(3, 2)[::-1].reshape(6).base is x
-False
-
-Clearly a simple list of numbers for strides can't jump around the original list
-to capture that pattern. My guess is that there is we can figure out if we need
-a copy by looking at startPosition, shape, and strides.
--/
 
 def applyBasic (reshape : Reshape) (basic : Basic) : Err Reshape :=
   match basic, reshape.shape, reshape.strides with
@@ -115,31 +146,6 @@ def applyBasic (reshape : Reshape) (basic : Basic) : Err Reshape :=
 
 end Reshape
 
--- Return the basic index along with the shape that will result from the indexing
-def simplifyNumpyBasic (items : NumpyBasic) (shape : Shape) : Err (Basic × Shape) := do
-  if 1 < items.count .ellipsis then .error "Index can contain at most one ellipsis" else .ok ()
-  if shape.length < items.length then .error "Too many indices" else .ok ()
-  match items, shape with
-  | [], shape => .ok ([], shape)
-  | .int n :: items, dim :: shape => do
-    -- Use a slice to do the finicky conversion to a position in the array
-    let slice <- Slice.build (.some n) .none .none
-    let n := slice.startOrDefault dim
-    let (rest, shape) <- simplifyNumpyBasic items shape
-    .ok (Item.nat n :: rest, shape)
-  | .slice slice :: items, dim :: shape => do
-    let (rest, shape) <- simplifyNumpyBasic items shape
-    .ok (Item.slice slice :: rest, slice.size dim :: shape)
-  | .newaxis :: items, dim :: shape => do
-    let (rest, shape) <- simplifyNumpyBasic items (dim :: shape)
-    .ok (Item.newaxis :: rest, 1 :: shape)
-  | .ellipsis :: items, dim :: shape => do
-    if items.length == 1 + shape.length then
-      simplifyNumpyBasic items (dim :: shape)
-    else -- there are fewer items than the shape
-      let (index, shape) <- simplifyNumpyBasic (.ellipsis :: items) shape
-      return (index, dim :: shape)
-  | _, _ => .error "impossible"
 
 end Index
 
@@ -170,7 +176,7 @@ private def testTensorElementBV (n : Nat) [Tensor.Element (BitVec n)] (dtype : S
   let _ <- IO.FS.removeFile file
   let expected : List (BitVec n) := List.range 20
   let actual := do
-    let rev <- Nat.foldM (fun i acc => (Index.getPosition arr i).map (fun i => i :: acc)) [] 20
+    let rev <- Nat.foldM (fun i acc => (Tensor.Element.getPosition arr i).map (fun i => i :: acc)) [] 20
     return rev.reverse
   let _ <- debugPrintln actual
   match actual with

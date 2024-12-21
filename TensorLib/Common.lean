@@ -1,5 +1,5 @@
 import Std.Tactic.BVDecide
-import Mathlib
+import Mathlib -- Currently just for `prod`. Can copy `One` and `Prod` type classes out to drop the dependency.
 
 namespace TensorLib
 
@@ -11,6 +11,11 @@ def get! [Inhabited a] (x : Err a) : a := match x with
 | .ok x => x
 
 def dot [Add a][Mul a][Zero a] (x y : List a) : a := (x.zip y).foldl (fun acc (a, b) => acc + a * b) 0
+
+def natDivCeil (num denom : Nat) : Nat :=
+  let div := num / denom
+  let mod := Nat.mod num denom
+  if mod != 0 then div + 1 else div
 
 instance [BEq a] : BEq (Err a) where
   beq x y := match x, y with
@@ -228,13 +233,6 @@ fastest at the left of the list. Because this could cause confusion, we make
 the constructor and fields private.
 
 `curr` has not yet been returned by `next`
-
-Invariant: `hasNext` iff all elements of `curr` are < the corresponding element of `max`
-The signal to stop is when the last element of `curr` is equal to the last element of `max`
-
-TODO: Could possibly use a Nat "count" field here to prove termination of
-some functions that use this, e.g. `toList`. `next` would start at `size` and decrement the counter,
-that begins at the product of the indices.
 -/
 structure DimsIter where
   private mk ::
@@ -252,28 +250,37 @@ def size (iter : DimsIter) : Nat := iter.dims.prod
 def make (dims : List Nat) : DimsIter :=
   DimsIter.mk dims.reverse (List.replicate dims.length 0)
 
-private def make! (dims : List Nat) : DimsIter := make dims
-
 /-
+We include `hasNext` for testing and documentation. We don't use it
+in functions because we have the `size` field to tell us when we're
+done, and that admits structural termination, unlike this method.
+
 This is trickier than I would like. The final value is
 [dim0-1, dim1-1, dim2-1, ..., dimN-1], but it hasn't been
 returned yet. To signal we are done, we'll set the final value
 to dimN.
 -/
-def hasNext (iter : DimsIter) : Bool :=
+private def hasNext (iter : DimsIter) : Bool :=
   let rec loop (dims ns : List Nat) : Bool :=
     match dims, ns with
     | dim :: dims, n :: ns => n < dim && loop dims ns
     | _, _ => true
   loop iter.dims iter.curr
 
-#guard (DimsIter.make! [1]).hasNext
+#guard (DimsIter.make [1]).hasNext
 #guard (DimsIter.mk [1] [0]).hasNext -- [0] hasn't been returned yet
 #guard !(DimsIter.mk [1] [1]).hasNext
 #guard (DimsIter.mk [1, 3] [0, 2]).hasNext
 #guard !(DimsIter.mk [1, 3] [0, 3]).hasNext
 
--- TODO: Take a proof of `hasNext = true` as an argument?
+/-
+Return the next element. Note that we don't need a `hasNext` predicate because
+we have a `size` field which tells us when to stop in an iteration loop.
+
+Note: I tried writing this as a `do/for` loop and in this case the recursive
+one seems nicer. We are walking over two lists simultaneously, which is easy
+here but with a for loop is either quadratic or awkward.
+-/
 def next (iter : DimsIter) : List Nat × DimsIter :=
   -- Invariant: `acc` is a list of 0s, so doesn't need to be reversed
   let rec loop (acc ms ns : List Nat) : List Nat :=
@@ -285,17 +292,9 @@ def next (iter : DimsIter) : List Nat × DimsIter :=
     | dim :: dims, n :: ns =>
       if n < dim - 1 then ((n + 1) :: acc).reverse.append ns
       else loop (0 :: acc) dims ns
-    | _, _ => [] -- Impossible if `iter.hasNext = true`
+    | _, _ => []
   let curr' := loop [] iter.dims iter.curr
   (iter.curr.reverse, { iter with curr := curr' })
-
-instance [Monad m] : ForM m DimsIter (List Nat) where
-  forM iter f := do
-    let mut iter := iter
-    for _ in [0:iter.size] do
-      let (dims, iter') := iter.next
-      iter := iter'
-      f dims
 
 instance [Monad m] : ForIn m DimsIter (List Nat) where
   forIn {α} [Monad m] (iter : DimsIter) (x : α) (f : List Nat -> α -> m (ForInStep α)) : m α := do
@@ -304,21 +303,12 @@ instance [Monad m] : ForIn m DimsIter (List Nat) where
     for _ in [0:iter.size] do
       let (dims, iter') := iter.next
       iter := iter'
-      let res' <- f dims res
-      match res' with
+      match <- f dims res with
       | .yield k
       | .done k => res := k
     return res
 
-#guard [[0, 0], [0, 1], [1, 0], [1, 1]] =
-      let iter := DimsIter.make [2, 2]
-      Id.run do
-        let mut xs := []
-        for x in iter do
-          xs := x :: xs
-        return xs.reverse
-
-def toList (iter : DimsIter) : List (List Nat) := Id.run do
+private def toList (iter : DimsIter) : List (List Nat) := Id.run do
   let mut res := []
   for xs in iter do
     res := xs :: res
@@ -326,13 +316,13 @@ def toList (iter : DimsIter) : List (List Nat) := Id.run do
 
 #guard (DimsIter.make [0, 1] ).toList == []
 #guard (DimsIter.make [1, 0]).toList == []
-#guard (DimsIter.make! [1]).toList == [[0]]
-#guard (DimsIter.make! [3]).toList == [[0], [1], [2]]
-#guard (DimsIter.make! [1, 1]).toList == [[0, 0]]
-#guard (DimsIter.make! [2, 1]).toList == [[0, 0], [1, 0]]
-#guard (DimsIter.make! [1, 1, 1]).toList == [[0, 0, 0]]
-#guard (DimsIter.make! [1, 1, 2]).toList == [[0, 0, 0], [0, 0, 1]]
-#guard (DimsIter.make! [3, 2]).toList == [[0, 0], [0, 1], [1, 0], [1, 1], [2, 0], [2, 1]]
+#guard (DimsIter.make [1]).toList == [[0]]
+#guard (DimsIter.make [3]).toList == [[0], [1], [2]]
+#guard (DimsIter.make [1, 1]).toList == [[0, 0]]
+#guard (DimsIter.make [2, 1]).toList == [[0, 0], [1, 0]]
+#guard (DimsIter.make [1, 1, 1]).toList == [[0, 0, 0]]
+#guard (DimsIter.make [1, 1, 2]).toList == [[0, 0, 0], [0, 0, 1]]
+#guard (DimsIter.make [3, 2]).toList == [[0, 0], [0, 1], [1, 0], [1, 1], [2, 0], [2, 1]]
 
 end DimsIter
 

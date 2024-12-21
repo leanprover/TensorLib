@@ -98,8 +98,8 @@ https://numpy.org/doc/stable/user/basics.indexing.html#slicing-and-striding
 > If j is not given it defaults to n for k > 0 and -n-1 for k < 0 .
 > If k is not given it defaults to 1.
 > Negative values are allowed. The meaning of x[-k] is x[n-k] where `n` is the size of the relevant dimension
->
-> Note that these requirements from the NumPy docs don't make sense if `n = 0`.
+
+Note that these requirements from the NumPy docs don't make sense if `n = 0`.
 -/
 structure Slice where
   start : Option Int
@@ -154,6 +154,10 @@ We use an option here to signal that the stopping point for negative step
 is the first element of the list. We can't use 0 because the stopping point
 is exclusive in a slice. [start ... stop) We can't use any negative number
 because the first `n` negative numbers wrap back around to positive numbers.
+
+I would love to find a representation with straightfoward arithmetic semantics
+that does not require an option for stop, but I could not find one in the presence of
+both postive and negative steps in about an hour of brainstorming.
 -/
 def stopOrDefault (s : Slice) (n : Nat) : Option Nat :=
   match s.stop, s.dir with
@@ -169,6 +173,13 @@ def stopOrDefault (s : Slice) (n : Nat) : Option Nat :=
     else if -n <= k && k < 0 then .some (n + k).toNat
     else if 0 <= k && k < n then .some k.toNat
     else /- n <= k -/ .some n
+
+theorem stopOrDefaultForward (s : Slice) (n : Nat) :
+  match s.dir with
+  | .Forward => (s.stopOrDefault n).isSome
+  | .Backward => True := by
+  unfold stopOrDefault
+  aesop
 
 theorem stopRange (s : Slice) (n : Nat) :
   match s.stopOrDefault n with
@@ -214,7 +225,7 @@ theorem stepForward (s : Slice) (H : s.dir = .Forward) : 0 < s.stepOrDefault := 
   all_goals simp
   rename_i k
   have H2 := s.stepNz
-  aesop
+  aesop (config := { warnOnNonterminal := false })
   omega
 
 def defaults (s : Slice) (dim : Nat) : Nat × Option Nat × Int :=
@@ -231,24 +242,25 @@ def size (s : Slice) (dim : Nat) : Nat :=
       have H2 := s.stopForward dim H1
       aesop
     nomatch k
-  | .Forward, .some stop => (stop - start) / step.toNat
+  | .Forward, .some stop => natDivCeil (stop - start) step.toNat
   | .Backward, .none => (start + 1) / step.natAbs
   | .Backward, .some stop => (start - stop) / step.natAbs
 
 #guard (Slice.build! .none .none .none).size 10 == 10
 #guard (Slice.build! .none .none (.some (-1))).size 10 == 10
 #guard (Slice.build! .none .none (.some (-2))).size 10 == 5
-#guard (Slice.build! .none .none (.some (2))).size 10 == 5
+#guard (Slice.build! .none .none (.some 2)).size 10 == 5
+#guard (Slice.build! .none .none (.some 2)).size 5 == 3
 #guard (Slice.build! (.some 5) .none .none).size 10 == 5
 #guard (Slice.build! (.some 5) .none (.some 1)).size 10 == 5
-#guard (Slice.build! (.some 5) .none (.some 3)).size 10 == 1
+#guard (Slice.build! (.some 5) .none (.some 2)).size 10 == 3
+#guard (Slice.build! (.some 5) .none (.some 3)).size 10 == 2
 #guard (Slice.build! (.some 5) .none (.some (-1))).size 10 == 6
 #guard (Slice.build! (.some 5) .none (.some (-3))).size 10 == 2
 #guard (Slice.build! .none (.some 5) .none).size 10 == 5
 #guard (Slice.build! .none (.some 5) (.some (-1))).size 10 == 4
 
--- Reference implementation. A numpy slice doesn't copy the data, but just updates the
--- start and strides of the ndarray.
+-- Reference implementation. When we do it for real we will use an iterator.
 private partial def sliceList! [Inhabited a] (s : Slice) (xs : List a) : List a :=
   let n := xs.length
   if n == 0 then [] else
@@ -282,6 +294,69 @@ private partial def sliceList! [Inhabited a] (s : Slice) (xs : List a) : List a 
 #guard (Slice.build! (.some 1) .none (.some 2)).sliceList! [0, 1, 2, 3, 4] == [1, 3]
 #guard (Slice.build! .none .none (.some (-2))).sliceList! [0, 1, 2, 3, 4] == [4, 2, 0]
 #guard (Slice.build! .none .none (.some (-200))).sliceList! [0, 1, 2, 3, 4] == [4]
+
+structure Iter where
+  private mk::
+  private dim : Nat
+  private size : Nat
+  private start : Nat
+  private stop : Option Nat
+  private step : Int
+  private curr : Nat -- not returned yet
+
+namespace Iter
+
+def make (slice : Slice) (dim : Nat) : Iter :=
+  let size := slice.size dim
+  let start := slice.startOrDefault dim
+  let stop := slice.stopOrDefault dim
+  let step := slice.stepOrDefault
+  let curr := start
+  { dim, size, start, stop, step, curr }
+
+def dir (iter : Iter) : Dir := if 0 <= iter.step then Dir.Forward else Dir.Backward
+
+def next (iter : Iter) : Option (Nat × Iter) := match iter.dir with
+  | .Forward =>
+    let stop := iter.stop.getD iter.dim -- we could show that stop.isSome by `stopOrDefaultForward` above so the default is never used
+    let curr := (iter.curr + iter.step).toNat
+    if iter.curr < stop then .some (iter.curr, { iter with curr }) else .none
+  | .Backward => match iter.stop with
+    | .none =>
+      if iter.curr == 0 then .none else
+      let curr := (iter.curr + iter.step).toNat
+      if 0 <= iter.curr then .some (iter.curr, { iter with curr }) else .none
+    | .some stop =>
+      let curr := (iter.curr + iter.step).toNat
+      if stop < iter.curr then .some (iter.curr, { iter with curr }) else .none
+
+def reset (iter : Iter) : Iter := { iter with curr := iter.start }
+
+instance [Monad m] : ForIn m Iter Nat where
+  forIn {α} [Monad m] (iter : Iter) (x : α) (f : Nat -> α -> m (ForInStep α)) : m α := do
+    let mut iter := iter
+    let mut res := x
+    for _ in [0:iter.size] do
+      match iter.next with
+      | .none => break
+      | .some (n, iter') =>
+        iter := iter'
+        match <- f n res with
+        | .yield k
+        | .done k => res := k
+    return res
+
+private def toList (iter : Iter) : List Nat := Id.run do
+  let mut res := []
+  for xs in iter do
+    res := xs :: res
+  return res.reverse
+
+#guard (Iter.make (Slice.build! .none .none .none) 5).toList == [0, 1, 2, 3, 4]
+#guard (Iter.make (Slice.build! .none .none (.some 2)) 5).toList == [0, 2, 4]
+#guard (Iter.make (Slice.build! (.some 3) .none .none) 5).toList == [3, 4]
+
+end Iter
 
 end Slice
 end TensorLib

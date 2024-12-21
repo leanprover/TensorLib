@@ -105,48 +105,9 @@ namespace Tensor
 /-!
 An tensor is trivially reshapable if it is contiguous with non-negative strides.
 -/
-def isTriviallyReshapable (arr : Tensor) : Bool := arr.unitStrides == arr.shape.unitStrides arr.dataOrder
-
-private def dtypeOfNpy (dtype : Npy.Dtype) : Err Dtype := do
-  let order <- match dtype.order with
-  | .bigEndian => .ok .bigEndian
-  | .littleEndian => .ok .littleEndian
-  | .notApplicable => .ok .oneByte
-  | .native => .error "native byte order not supported"
-  .ok $ Dtype.mk dtype.name order
-
-private def dataOfNpy (arr : Npy.Ndarray) : ByteArray :=
-  let dst := ByteArray.mkEmpty arr.nbytes
-  arr.data.copySlice arr.startIndex dst 0 arr.nbytes
-
-/-
-Makes a copy of the data, dropping the header and padding.
-Probably not a great choice, but sticking with it for now.
-I want to avoid writing .npy files with wrong header data.
--/
-def ofNpy (arr : Npy.Ndarray) : Err Tensor := do
-  let dtype <- dtypeOfNpy arr.header.descr
-  let dataOrder := arr.header.dataOrder
-  let shape := arr.header.shape
-  let data := dataOfNpy arr
-  let startIndex := 0
-  return { dtype, dataOrder, shape, data, startIndex }
-
-private def dtypeToNpy (dtype : Dtype) : Npy.Dtype :=
-  let order := match dtype.order with
-  | .bigEndian => .bigEndian
-  | .littleEndian => .littleEndian
-  | .oneByte => .notApplicable
-  Npy.Dtype.mk dtype.name order
-
-def toNpy (arr : Tensor) : Npy.Ndarray :=
-  let descr := dtypeToNpy arr.dtype
-  let dataOrder := arr.dataOrder
-  let shape := arr.shape
-  let header : Npy.Header := { descr, dataOrder, shape }
-  let data := arr.data
-  let startIndex := 0
-  { header, data, startIndex }
+def isTriviallyReshapable (arr : Tensor) : Bool :=
+  arr.startIndex == 0
+  && arr.unitStrides == arr.shape.unitStrides arr.dataOrder
 
 def empty (dtype : Dtype) (shape : Shape) : Tensor :=
   let data := ByteArray.mkEmpty (dtype.itemsize * shape.count)
@@ -225,21 +186,58 @@ the picture, and require all the logic in the code above:
    some are negative, it can require a copy to reshape.
 4. Data ordering (C vs Fortran, row major vs column major) goes into the calculation of whether an array
    is contiguous or not. The same strides on the same data can be contiguous or not depending on the data ordering.
+
+Examples:
+
+Reshapes can require a copy. For example, when we get the data out of order via
+reverses and reshapes, flattening it again will require a copy.
+
+# x = np.arange(6)
+
+# x.reshape(3, 2).base is x
+True
+
+# x.reshape(3, 2)[::-1].base is x
+True
+
+# x.reshape(3, 2)[::-1].reshape(6)
+array([4, 5, 2, 3, 0, 1])
+
+# x.reshape(3, 2)[::-1].reshape(6).base is x
+False
+
+Clearly a simple list of numbers for strides can't jump around the original list
+to capture that pattern. My guess is that there is we can figure out if we need
+a copy by looking at startPosition, shape, and strides.
 -/
-def copyAndReshape (arr : Tensor) (shape : Shape) : Err Tensor :=
+private def copyAndReshape (arr : Tensor) (shape : Shape) : Err Tensor :=
   if arr.shape.prod != shape.prod then .error "Incompatible shapes" else
   let arr := arr.copy
   .ok { arr with shape, unitStrides := shape.unitStrides arr.dataOrder }
 
 def reshape (arr : Tensor) (shape : Shape) : Err Tensor :=
+  if arr.shape.prod != shape.prod then .error "Incompatible shapes" else
   if arr.isTriviallyReshapable
   then .ok { arr with shape, unitStrides := shape.unitStrides arr.dataOrder }
   else copyAndReshape arr shape
 
-def reshape! (arr : Tensor) (shape : Shape) : Tensor := get! $ reshape arr shape
+private def reshape! (arr : Tensor) (shape : Shape) : Tensor := get! $ reshape arr shape
 
 private def copyAndReshape! (arr : Tensor) (shape : Shape) : Tensor :=
   get! (copyAndReshape arr shape)
+
+/-
+NumPy allows you to transpose flexibly on the axes, e.g. allowing arbitrary
+reorders. This is just the default, which reverses the dimensions.
+It is also extremely conservative when it comes to needing copies.
+-/
+def transpose (arr : Tensor) : Tensor :=
+  let shape : Shape := arr.shape.reverse
+  if arr.isTriviallyReshapable
+  then { arr with shape, unitStrides := shape.unitStrides arr.dataOrder }
+  else
+    let arr := arr.copy
+    { arr with shape, unitStrides := shape.unitStrides arr.dataOrder }
 
 class Element (a : Type) where
   dtype : Dtype
@@ -402,6 +400,52 @@ def format (a : Type) [Repr a] [Element a] (x : Tensor) : Err Std.Format := do
 def str (a : Type) [Repr a] [Tensor.Element a] (x : Tensor) : String := match format a x with
 | .error err => s!"Error: {err}"
 | .ok s => Std.Format.pretty s 120
+
+private def dtypeOfNpy (dtype : Npy.Dtype) : Err Dtype := do
+  let order <- match dtype.order with
+  | .bigEndian => .ok .bigEndian
+  | .littleEndian => .ok .littleEndian
+  | .notApplicable => .ok .oneByte
+  | .native => .error "native byte order not supported"
+  .ok $ Dtype.mk dtype.name order
+
+private def dataOfNpy (arr : Npy.Ndarray) : ByteArray :=
+  let dst := ByteArray.mkEmpty arr.nbytes
+  arr.data.copySlice arr.startIndex dst 0 arr.nbytes
+
+/-
+Makes a copy of the data, dropping the header and padding.
+Probably not a great choice, but sticking with it for now.
+I want to avoid writing .npy files with wrong header data.
+-/
+def ofNpy (arr : Npy.Ndarray) : Err Tensor := do
+  let dtype <- dtypeOfNpy arr.header.descr
+  let dataOrder := arr.header.dataOrder
+  let shape := arr.header.shape
+  let data := dataOfNpy arr
+  let startIndex := 0
+  return { dtype, dataOrder, shape, data, startIndex }
+
+private def dtypeToNpy (dtype : Dtype) : Npy.Dtype :=
+  let order := match dtype.order with
+  | .bigEndian => .bigEndian
+  | .littleEndian => .littleEndian
+  | .oneByte => .notApplicable
+  Npy.Dtype.mk dtype.name order
+
+/-
+If we have a non-trivial view, we will need a copy, since strides
+and start positions are not included in the .npy file format
+-/
+private def toNpy (arr : Tensor) : Npy.Ndarray :=
+  let arr := if arr.isTriviallyReshapable then arr else arr.copy
+  let descr := dtypeToNpy arr.dtype
+  let dataOrder := arr.dataOrder
+  let shape := arr.shape
+  let header : Npy.Header := { descr, dataOrder, shape }
+  let data := arr.data
+  let startIndex := 0
+  { header, data, startIndex }
 
 section Test
 
