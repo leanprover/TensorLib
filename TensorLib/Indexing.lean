@@ -4,12 +4,14 @@ import TensorLib.Slice
 import TensorLib.Npy
 
 /-
-Theorems to prove:
+Theorems to prove (taken from NumPy docs):
 
 1. Basic slicing with more than one non-: entry in the slicing tuple,
    acts like repeated application of slicing using a single non-: entry,
    where the non-: entries are successively taken (with all other non-: entries replaced by :).
    Thus, x[ind1, ..., ind2,:] acts like x[ind1][..., ind2, :] under basic slicing.
+
+2. ...TODO...
 -/
 
 namespace TensorLib
@@ -38,115 +40,163 @@ abbrev NumpyBasic := List NumpyItem
 -- ((), (1,))
 inductive Item where
 | nat (n : Nat)
-| slice (slice : Slice)
-| newaxis
+| slice (slice : Slice.Iter)
 
 abbrev Basic := List Item
 
 -- Return the basic index along with the shape that will result from the indexing
-def toBasic (items : NumpyBasic) (shape : Shape) : Err (Basic × Shape) := do
-  if 1 < items.count .ellipsis then .error "Index can contain at most one ellipsis" else .ok ()
-  if shape.length < items.length then .error "Too many indices" else .ok ()
-  match items, shape with
-  | [], shape => .ok ([], shape)
-  | .int n :: items, dim :: shape => do
-    -- Use a slice to do the finicky conversion to a position in the array
-    let slice <- Slice.build (.some n) .none .none
-    let n := slice.startOrDefault dim
-    let (rest, shape) <- toBasic items shape
-     -- Nat indexes drop the axis
-    .ok (Item.nat n :: rest, shape)
-  | .slice slice :: items, dim :: shape => do
-    let (rest, shape) <- toBasic items shape
-    .ok (Item.slice slice :: rest, slice.size dim :: shape)
-  | .newaxis :: items, dim :: shape => do
-    let (rest, shape) <- toBasic items (dim :: shape)
-    .ok (Item.newaxis :: rest, 1 :: shape)
-  | .ellipsis :: items, dim :: shape => do
-    if items.length == 1 + shape.length then
-      toBasic items (dim :: shape)
-    else -- there are fewer items than the shape
-      let (index, shape) <- toBasic (.ellipsis :: items) shape
-      return (index, dim :: shape)
-  | _, _ => .error "impossible"
+def toBasic (items : NumpyBasic) (shape : Shape) : Err Basic := do
+  if 1 < items.count .ellipsis then .error "Index can contain at most one ellipsis"
+  else if shape.length < items.length then .error "Too many indices"
+  else
+    let rec loop (items : NumpyBasic) (shape : Shape) : Err Basic := match items, shape with
+    | [], _ => .ok []
+    | .int n :: items, dim :: shape => do
+      -- Use a slice to do the finicky conversion to a position in the array
+      let slice := Slice.ofInt n
+      let n := slice.startOrDefault dim
+      let rest <- loop items shape
+      .ok $ Item.nat n :: rest
+    | .slice slice :: items, dim :: shape => do
+      let rest <- loop items shape
+      .ok $ Item.slice (Slice.Iter.make slice dim) :: rest
+    | .newaxis :: items, dim :: shape => do
+      let rest <- loop items (dim :: shape)
+      .ok $ .slice (Slice.Iter.make Slice.all dim) :: rest
+    | .ellipsis :: items, dim :: shape => do
+      if items.length == 1 + shape.length then
+        loop items (dim :: shape)
+      else  -- there are fewer items than the shape
+        loop (.ellipsis :: items) shape
+    | _, _ => .error "impossible"
+    loop items shape
 
-  -- All lists stored backwards, so make it hard to get at them
+  /-
+   Iteration over a basic index is a little tricky. The new axes have been
+   compiled away, but we still have constant indices and slice indices.
+   These correspond roughly to constant counters and incrementing counters where
+   we go lexicographically "upwards" during iteration (though the actual numbers
+   may go down if we have negative steps.) We have to handle the following corner
+   cases
+
+   0. The index doesn't make sense. For example, the shape's dimension doesn't line
+      up with the corresponding index. Say the shape's dimension is 2, but the iterator goes
+      up to 7. As another error case, there may be more dimensions than indices.
+   1. The index is empty on creation. E.g. if the shape is empty, or if the
+      slice iterators are already all maxed out.
+   2. We only have constant indices. This is an iterator of size 1, which we
+      need to handle properly.
+
+   All lists stored backwards, so make it hard to get at them
+   Invariant: shape != []
+   Invariant: shape.length == basic.length == next.length
+   Invariant: each element of `basic` is in bounds for the corresponding dimension in `shape`.
+              This is checked on the call to `make`.
+  -/
   structure BasicIter where
     private mk ::
-    private shape : Shape -- Shape of the input array
-    private basic : Basic -- Basic index
-    private curr : List Nat -- Current position in the iteration
+    private basic : Basic
+    private curr : Option (List Nat) -- `curr` is `none` iff we are done
+  deriving Inhabited
 
   namespace BasicIter
 
-  private def init (shape : Shape) (basic : Basic) : List Nat := match shape, basic with
-  | _ :: shape, .nat n :: basic => n :: init shape basic
-  | dim :: shape, .slice slice :: basic  => slice.startOrDefault dim :: init shape basic
-  | _ :: shape, .newaxis :: basic => 0 :: init shape basic
-  | _, _ => []
-
-  def make (shape : Shape) (basic : Basic) : BasicIter :=
-    let s := shape.reverse
-    let b := basic.reverse
-    let c := init s b
-    BasicIter.mk s b c
-
-  def next (iter : BasicIter) : List Nat × BasicIter :=
-    let rec loop (curr : List Nat) (basic : Basic) : List Nat := match curr, basic with
-    | _ :: curr, Item.nat m :: basic => m :: next
-    | _, _ => []
-    let curr := loop iter.curr iter.basic
-    { iter with curr }
-  end BasicIter
+  def size (iter : BasicIter) : Nat :=
+    if iter.curr.isNone then 0 else loop iter.basic 1
+  where
+    loop xs acc := match xs with
+    | [] => acc
+    | .nat _ :: xs => loop xs acc
+    | .slice slice :: xs => loop xs (slice.size * acc)
 
 
+  -- An iterator is compatible with a shape if all of the shape's dimensions are
+  -- larger than the constant indices and equal to the iterator indices.
+  private def compatibleWith (basic : Basic) (shape : Shape) : Bool := match basic, shape with
+  | [], [] => true
+  | .nat n :: basic, dim :: shape => n < dim && compatibleWith basic shape
+  | .slice iter :: basic, dim :: shape => iter.dim == dim && compatibleWith basic shape
+  | _, _ => false
 
+  def hasNext (iter : BasicIter) : Bool := iter.curr.isSome
 
+  /-
+  Grabbing the first element is complicated by the fact that a slice index can be
+  exhausted already, so we need to increment it. While calculating the first iteration, we
+  will possibly rewrite the index to bump the exhausted sub-indices.
 
+   `none` iff the iterator is empty. Does not handle error cases, which are handled by `make`.
+  -/
+  private def nextWithCarry (basic : Basic) (carry : Bool) : Option (List Nat × Basic) := match basic with
+  | [] => if carry then .none else .some ([], [])
+  | .nat n :: basic => do
+    let (ns, basic) <- nextWithCarry basic carry
+    return (n :: ns, .nat n :: basic)
+  | .slice sliceIter :: basic => match sliceIter.next with
+    | .none => do
+      let sliceIter := sliceIter.reset
+      let (ns, basic) <- nextWithCarry basic (carry := true)
+      return (0 :: ns, .slice sliceIter :: basic)
+    | .some (n, nextSliceIter) => do
+      if !carry then
+        let (ns, basic) <- nextWithCarry basic false
+        return (n :: ns, .slice sliceIter :: basic)
+      else
+        if n < sliceIter.dim - 1 then
+          let (ns, basic) <- nextWithCarry basic false
+          return ((n+1) :: ns, .slice nextSliceIter :: basic)
+        else
+          let (ns, basic) <- nextWithCarry basic true
+          let sliceIter := sliceIter.reset
+          return (0 :: ns, .slice sliceIter :: basic)
 
+  def next (iter : BasicIter) : Option (List Nat × BasicIter) :=
+    match nextWithCarry iter.basic false with
+    | .none => .none
+    | .some (ns, basic) => .some (ns, { iter with basic })
 
+  def make (shape : Shape) (basic : Basic) : Err BasicIter :=
+    if !(compatibleWith basic shape) then .error "shape/index mismatch" else
+    let basic := basic.reverse
+    .ok $ match nextWithCarry basic false with
+    | .none => BasicIter.mk basic .none
+    | .some (ns, basic) => BasicIter.mk basic (.some ns)
 
+instance [Monad m] : ForIn m BasicIter (List Nat) where
+  forIn {α} [Monad m] (iter : BasicIter) (x : α) (f : List Nat -> α -> m (ForInStep α)) : m α := do
+    let mut iter : BasicIter := iter
+    let mut res := x
+    for _ in [0:iter.size] do
+      match iter.next with
+      | .none => break
+      | .some (ns, iter') =>
+        iter := iter'
+        match <- f ns res with
+        | .yield k
+        | .done k => res := k
+    return res
 
+private def toList (iter : BasicIter) : List (List Nat) := Id.run do
+  let mut res := []
+  for xs in iter do
+    res := xs :: res
+  return res.reverse
 
+-- Testing
+private def numpyBasicToList (shape : Shape) (basic : NumpyBasic) : Option (List (List Nat)) := do
+  let basic <- (toBasic basic shape).toOption
+  let iter <- (make shape basic).toOption
+  iter.toList
 
+#guard numpyBasicToList [] [] == .some [[]]
+#guard numpyBasicToList [1] [.int 0] == .some [[0]]
+#guard numpyBasicToList [2] [.int 0] == .some [[0]]
+#guard numpyBasicToList [2] [.int 1] == .some [[1]]
+#guard (numpyBasicToList [2] [.int 2]) == .none
+#guard (numpyBasicToList [2] [.int (-1)]) == some [[1]]
+#guard (numpyBasicToList [2] [.int (-2)]) == some [[0]]
 
-
-
-structure Reshape where
-  shape : Shape
-  strides : Strides
-  startPosition : ℕ
-  -- TODO H : shape.length == strides.length
-namespace Reshape
-
-def applyBasic (reshape : Reshape) (basic : Basic) : Err Reshape :=
-  match basic, reshape.shape, reshape.strides with
-  | [], _, _ => .ok reshape
-  | .newaxis :: basic, _, _ => do
-    let rest <- applyBasic reshape basic
-    return { rest with shape := 1 :: rest.shape, strides := 1 :: rest.strides }
-  | .nat n :: basic, dim :: shape, stride :: strides =>
-    if dim <= n
-    then .error s!"Index out of range: {dim} <= {n}"
-    else
-      let startPosition := (reshape.startPosition + (n * stride)).toNat
-      applyBasic (Reshape.mk shape strides startPosition) basic
-  | .slice slice :: basic, dim :: shape, stride :: strides =>
-    let start := slice.startOrDefault dim
-    let stop := slice.stopOrDefault dim
-    let step := slice.stepOrDefault
-    if dim <= start then .error s!"Slice start out of range: {dim} <= {start}"
-    else if stop.any (fun k => dim <= k) then .error s!"Slice stop out of range: {dim} <= {stop}"
-    else
-      let startPosition := (reshape.startPosition + (start * stride)).toNat
-      do
-        let rest <- applyBasic (Reshape.mk shape strides startPosition) basic
-        return { rest with shape := slice.size dim :: rest.shape, strides := stride * step :: rest.strides }
-  | _, _, _ => .error s!"Too many indices"
-
-end Reshape
-
-
+end BasicIter
 end Index
 
 section Test

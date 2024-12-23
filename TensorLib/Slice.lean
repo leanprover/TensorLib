@@ -126,6 +126,14 @@ def build (start stop step : Option Int) : Err Slice :=
 private partial def build! (start stop step : Option Int) : Slice :=
   get! (build start stop step)
 
+def all : Slice :=
+  let stepNz : Option.none ≠ .some (0:Int) := by trivial
+  Slice.mk .none .none .none stepNz
+
+def ofInt (n : Int) : Slice :=
+  let stepNz : Option.none ≠ .some (0:Int) := by trivial
+  Slice.mk (.some n) .none .none stepNz
+
 def dir (s : Slice): Dir := match s.step with
   | .none => Dir.Forward
   | .some k => if k < 0 then Dir.Backward else Dir.Forward
@@ -297,8 +305,8 @@ private partial def sliceList! [Inhabited a] (s : Slice) (xs : List a) : List a 
 
 structure Iter where
   private mk::
-  private dim : Nat
-  private size : Nat
+  dim : Nat
+  size : Nat
   private start : Nat
   private stop : Option Nat
   private step : Int
@@ -330,6 +338,10 @@ def next (iter : Iter) : Option (Nat × Iter) := match iter.dir with
       let curr := (iter.curr + iter.step).toNat
       if stop < iter.curr then .some (iter.curr, { iter with curr }) else .none
 
+def hasNext (iter : Iter) : Bool := iter.next.isSome
+
+def peek (iter : Iter) : Option Nat := iter.next.map fun (x, _) => x
+
 def reset (iter : Iter) : Iter := { iter with curr := iter.start }
 
 instance [Monad m] : ForIn m Iter Nat where
@@ -346,6 +358,8 @@ instance [Monad m] : ForIn m Iter Nat where
         | .done k => res := k
     return res
 
+-- TODO: This is the second one of these I've written. Figure out how to add a method
+-- to the ForIn type class.
 private def toList (iter : Iter) : List Nat := Id.run do
   let mut res := []
   for xs in iter do
