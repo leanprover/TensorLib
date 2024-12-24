@@ -212,7 +212,7 @@ def dimIndexToOffset (strides : Strides) (index : DimIndex) : Offset := dot stri
 #guard positionToDimIndex [3, 1] 4 == [1, 1]
 #guard dimIndexToOffset [3, 1] [1, 1] == 4
 
--- In general you should use DimIter instead of this, which is equivalent
+-- In general you should use DimsIter instead of this, which is equivalent
 -- to `DimIter.toList` but I left it here because it is obviously terminating.
 def allDimIndices (shape : Shape) : List DimIndex :=
   let strides := unitStrides shape DataOrder.C
@@ -247,7 +247,7 @@ namespace DimsIter
 -- 0th value (all 0s)
 def size (iter : DimsIter) : Nat := iter.dims.prod
 
-def make (dims : List Nat) : DimsIter :=
+def make (dims : Shape) : DimsIter :=
   DimsIter.mk dims.reverse (List.replicate dims.length 0)
 
 /-
