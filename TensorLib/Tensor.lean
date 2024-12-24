@@ -215,16 +215,16 @@ private def copyAndReshape (arr : Tensor) (shape : Shape) : Err Tensor :=
   let arr := arr.copy
   .ok { arr with shape, unitStrides := shape.unitStrides arr.dataOrder }
 
+def copyAndReshape! (arr : Tensor) (shape : Shape) : Tensor :=
+  get! (copyAndReshape arr shape)
+
 def reshape (arr : Tensor) (shape : Shape) : Err Tensor :=
   if arr.shape.prod != shape.prod then .error "Incompatible shapes" else
   if arr.isTriviallyReshapable
   then .ok { arr with shape, unitStrides := shape.unitStrides arr.dataOrder }
   else copyAndReshape arr shape
 
-private def reshape! (arr : Tensor) (shape : Shape) : Tensor := get! $ reshape arr shape
-
-private def copyAndReshape! (arr : Tensor) (shape : Shape) : Tensor :=
-  get! (copyAndReshape arr shape)
+def reshape! (arr : Tensor) (shape : Shape) : Tensor := get! $ reshape arr shape
 
 /-
 NumPy allows you to transpose flexibly on the axes, e.g. allowing arbitrary

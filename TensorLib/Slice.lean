@@ -123,7 +123,7 @@ def build (start stop step : Option Int) : Err Slice :=
     let stepNz : step ≠ some 0 := by aesop
     .ok (Slice.mk start stop step stepNz)
 
-private partial def build! (start stop step : Option Int) : Slice :=
+partial def build! (start stop step : Option Int) : Slice :=
   get! (build start stop step)
 
 def all : Slice :=
@@ -300,9 +300,17 @@ private partial def sliceList! [Inhabited a] (s : Slice) (xs : List a) : List a 
 #guard (Slice.build! (.some 500) .none (.some (-1))).sliceList! [0, 1, 2, 3, 4] == [4, 3, 2, 1, 0]
 #guard (Slice.build! .none .none (.some 2)).sliceList! [0, 1, 2, 3, 4] == [0, 2, 4]
 #guard (Slice.build! (.some 1) .none (.some 2)).sliceList! [0, 1, 2, 3, 4] == [1, 3]
+#guard (Slice.build! .none .none (.some (-1))).sliceList! [0, 1, 2, 3, 4] == [4, 3, 2, 1, 0]
 #guard (Slice.build! .none .none (.some (-2))).sliceList! [0, 1, 2, 3, 4] == [4, 2, 0]
 #guard (Slice.build! .none .none (.some (-200))).sliceList! [0, 1, 2, 3, 4] == [4]
 
+/-
+Iteration over slices is finicky because
+1. We can go forwards and backwards
+2. We must know when to stop
+3. `Nat` is the only type that makes sense for indices into an array.
+4. We can start with an empty iterator
+-/
 structure Iter where
   private mk::
   dim : Nat
@@ -310,39 +318,48 @@ structure Iter where
   private start : Nat
   private stop : Option Nat
   private step : Int
-  private curr : Nat -- not returned yet
+  private curr : Option Nat -- not returned yet, `curr = none` iff the iterator is empty
+deriving Repr
 
 namespace Iter
 
+private def dir' (n : Int) : Dir := if 0 <= n then Dir.Forward else Dir.Backward
+
+def dir (iter : Iter) : Dir := dir' iter.step
+
+-- The only complexity here is deciding whether the iterator starts off empty
+-- so we can set `curr` correctly
 def make (slice : Slice) (dim : Nat) : Iter :=
   let size := slice.size dim
   let start := slice.startOrDefault dim
   let stop := slice.stopOrDefault dim
   let step := slice.stepOrDefault
-  let curr := start
+  let curr := match dir' step, stop with
+  | .Forward, _ => if start < stop.getD dim then .some start else .none
+  | .Backward, .none => .some start
+  | .Backward, .some stop => if stop < start then .some start else .none
   { dim, size, start, stop, step, curr }
 
-def dir (iter : Iter) : Dir := if 0 <= iter.step then Dir.Forward else Dir.Backward
-
-def next (iter : Iter) : Option (Nat × Iter) := match iter.dir with
+def next (iter : Iter) : Option (Nat × Iter) := match iter.curr with
+| .none => .none
+| .some curr =>
+  match iter.dir with
   | .Forward =>
     let stop := iter.stop.getD iter.dim -- we could show that stop.isSome by `stopOrDefaultForward` above so the default is never used
-    let curr := (iter.curr + iter.step).toNat
-    if iter.curr < stop then .some (iter.curr, { iter with curr }) else .none
-  | .Backward => match iter.stop with
-    | .none =>
-      if iter.curr == 0 then .none else
-      let curr := (iter.curr + iter.step).toNat
-      if 0 <= iter.curr then .some (iter.curr, { iter with curr }) else .none
-    | .some stop =>
-      let curr := (iter.curr + iter.step).toNat
-      if stop < iter.curr then .some (iter.curr, { iter with curr }) else .none
+    let c := (curr + iter.step).toNat
+    let nextCurr := if stop <= c then none else some c
+    some (curr, { iter with curr := nextCurr })
+  | .Backward =>
+    let stop := iter.stop.getD 0
+    let c := curr + iter.step
+    let nextCurr := if c < stop then none else some c.toNat
+    some (curr, { iter with curr := nextCurr })
 
 def hasNext (iter : Iter) : Bool := iter.next.isSome
 
-def peek (iter : Iter) : Option Nat := iter.next.map fun (x, _) => x
+def peek (iter : Iter) : Option Nat := iter.curr
 
-def reset (iter : Iter) : Iter := { iter with curr := iter.start }
+def reset (iter : Iter) : Iter := { iter with curr := some iter.start }
 
 instance [Monad m] : ForIn m Iter Nat where
   forIn {α} [Monad m] (iter : Iter) (x : α) (f : Nat -> α -> m (ForInStep α)) : m α := do
@@ -366,10 +383,18 @@ private def toList (iter : Iter) : List Nat := Id.run do
     res := xs :: res
   return res.reverse
 
-#guard (Iter.make (Slice.build! .none .none .none) 5).toList == [0, 1, 2, 3, 4]
+#guard (Iter.make Slice.all 5).toList == [0, 1, 2, 3, 4]
 #guard (Iter.make (Slice.build! .none .none (.some 2)) 5).toList == [0, 2, 4]
 #guard (Iter.make (Slice.build! (.some 3) .none .none) 5).toList == [3, 4]
+#guard (Iter.make (Slice.build! .none .none (.some (-1))) 5).toList == [4, 3, 2, 1, 0]
 
+#eval do
+  let i0 := Iter.make Slice.all 3
+  let (n0, i1) <- i0.next
+  let (n1, i2) <- i1.next
+  let (n2, i3) <- i2.next
+  --let (n3, i4) <- i3.next
+  return (i0, n0, i1, n1, i2, n2, i3) -- , n3, i4)
 end Iter
 
 end Slice
