@@ -45,26 +45,35 @@ deriving Repr
 
 abbrev Basic := List Item
 
-def toBasic (items : NumpyBasic) (shape : Shape) : Err Basic := do
+private def shapeToSliceIters (shape : Shape) : List Item :=
+  shape.map fun dim => .slice (Slice.Iter.make Slice.all dim)
+
+-- Return the translated items, along with the new output shape
+def toBasic (items : NumpyBasic) (shape : Shape) : Err (Basic × Shape) := do
   if 1 < items.count .ellipsis then .error "Index can contain at most one ellipsis"
   else if shape.length < items.length then .error "Too many indices"
   else
-    let rec loop (items : NumpyBasic) (shape : Shape) : Err Basic := match items, shape with
-    | [], _ => .ok []
+    let rec loop (items : NumpyBasic) (shape : Shape) := match items, shape with
+    -- If we have too few index items, the rest are assumed to be unchanged axes
+    | [], shape =>
+      .ok (shapeToSliceIters shape, shape)
     | .int n :: items, dim :: shape => do
       -- constant indices throw on overflow/underflow
       if n <= -dim || dim <= n then .error "Constant index out of bounds" else
       -- Use a slice to do the finicky conversion to a position in the array
       let slice := Slice.ofInt n
       let n := slice.startOrDefault dim
-      let rest <- loop items shape
-      .ok $ Item.nat n :: rest
+      let (basic, shape) <- loop items shape
+      -- Drop the dimension from the resulting shape
+      .ok (Item.nat n :: basic, shape)
     | .slice slice :: items, dim :: shape => do
-      let rest <- loop items shape
-      .ok $ Item.slice (Slice.Iter.make slice dim) :: rest
+      let (basic, shape) <- loop items shape
+      let slice := Slice.Iter.make slice dim
+      .ok (Item.slice slice :: basic, slice.size :: shape)
     | .newaxis :: items, dim :: shape => do
-      let rest <- loop items (dim :: shape)
-      .ok $ .slice (Slice.Iter.make Slice.all dim) :: rest
+      let (basic, shape) <- loop items shape
+      let slice := Slice.Iter.make Slice.all dim
+      .ok (.slice slice :: basic, dim :: shape)
     | .ellipsis :: items, dim :: shape => do
       if items.length == 1 + shape.length then
         loop items (dim :: shape)
@@ -191,6 +200,23 @@ instance [Monad m] : ForIn m BasicIter (List Nat) where
         | .done k => res := k
     return res
 
+def applyWithCopy (index : NumpyBasic) (arr : Tensor) : Err Tensor := do
+  let itemsize := arr.itemsize
+  let oldShape := arr.shape
+  let (basic, newShape) <- toBasic index oldShape
+  let iter <- BasicIter.make oldShape basic
+  let mut data := ByteArray.mkEmpty (iter.size * itemsize)
+  for dimIndex in iter do
+    let posn := arr.dimIndexToPosition dimIndex
+    for j in [0:itemsize] do
+      let b := arr.data.get! (posn + j)
+      data := data.push b
+  return {
+     dtype := arr.dtype,
+     shape := newShape,
+     data
+  }
+
 section Test
 
 private def toList (iter : BasicIter) : List (List Nat) := Id.run do
@@ -201,7 +227,7 @@ private def toList (iter : BasicIter) : List (List Nat) := Id.run do
 
 -- Testing
 private def numpyBasicToList (shape : Shape) (basic : NumpyBasic) : Option (List (List Nat)) := do
-  let basic <- (toBasic basic shape).toOption
+  let (basic, _) <- (toBasic basic shape).toOption
   let iter <- (make shape basic).toOption
   iter.toList
 
@@ -216,7 +242,7 @@ private def numpyBasicToList (shape : Shape) (basic : NumpyBasic) : Option (List
 #guard (numpyBasicToList [4] [.slice $ Slice.build! .none .none (.some 2)]) == some [[0], [2]]
 #guard (numpyBasicToList [4] [.slice $ Slice.build! (.some (-1)) .none (.some (-2))]) == some [[3], [1]]
 #guard (numpyBasicToList [2, 2] [.int 5]) == none
-#guard (numpyBasicToList [2, 2] [.int 0]) == none
+#guard (numpyBasicToList [2, 2] [.int 0]) == some [[0, 0], [0, 1]]
 #guard (numpyBasicToList [2, 2] [.int 0, .int 0]) == some [[0, 0]]
 #guard (numpyBasicToList [2, 2] [.int 0, .int 1]) == some [[0, 1]]
 #guard (numpyBasicToList [2, 2] [.int 0, .int 2]) == none
@@ -241,6 +267,7 @@ private def numpyBasicToList (shape : Shape) (basic : NumpyBasic) : Option (List
 --   -- let (ns8, iter8) <- iter7.next
 --   -- let (ns9, iter9) <- iter8.next
 --   return (basic, iter0, ns0, iter1, ns1, iter2, ns2, iter3) -- , ns4, iter4) -- , ns5, iter5, ns6, iter6, ns7, iter7, ns8, iter8, ns9, iter9)
+
 end Test
 
 end BasicIter

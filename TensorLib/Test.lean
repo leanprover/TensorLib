@@ -39,14 +39,23 @@ private def testTensorElementBV (n : Nat) [Tensor.Element (BitVec n)] (dtype : S
 -- TODO: Asserting true/false here would be great
 private def iotrue : IO Bool := return true
 
-#eval testTensorElementBV 16 "uint16" == iotrue
-#eval testTensorElementBV 32 "uint16" -- expect false
-#eval testTensorElementBV 64 "uint16" -- expect false
-#eval testTensorElementBV 16 "uint32" -- expect false
-#eval testTensorElementBV 32 "uint32" -- expect true
-#eval testTensorElementBV 64 "uint32" -- expect false
-#eval testTensorElementBV 16 "uint64" -- expect false
-#eval testTensorElementBV 32 "uint64" -- expect false
-#eval testTensorElementBV 64 "uint64" -- expect true
+/-- info: true -/
+#guard_msgs in #eval testTensorElementBV 16 "uint16"
+/-- info: false -/
+#guard_msgs in #eval testTensorElementBV 32 "uint16"
+/-- info: false -/
+#guard_msgs in #eval testTensorElementBV 64 "uint16"
+/-- info: false -/
+#guard_msgs in #eval testTensorElementBV 16 "uint32"
+/-- info: true -/
+#guard_msgs in #eval testTensorElementBV 32 "uint32"
+/-- info: false -/
+#guard_msgs in #eval testTensorElementBV 64 "uint32"
+/-- info: false -/
+#guard_msgs in #eval testTensorElementBV 16 "uint64"
+/-- info: false -/
+#guard_msgs in #eval testTensorElementBV 32 "uint64"
+/-- info: true -/
+#guard_msgs in #eval testTensorElementBV 64 "uint64"
 
 end Test
