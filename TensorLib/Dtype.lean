@@ -51,5 +51,10 @@ def itemsize (t : Dtype) := t.name.itemsize
 
 def sizedStrides (dtype : Dtype) (s : Shape) : Strides := List.map (fun x => x * dtype.itemsize) s.cUnitStrides
 
+def int8 : Dtype := Dtype.mk Dtype.Name.int8 ByteOrder.littleEndian
+def uint8 : Dtype := Dtype.mk Dtype.Name.uint8 ByteOrder.littleEndian
+def uint64 : Dtype := Dtype.mk Dtype.Name.uint64 ByteOrder.littleEndian
+def float64 : Dtype := Dtype.mk Dtype.Name.float64 ByteOrder.littleEndian
+
 end Dtype
 end TensorLib

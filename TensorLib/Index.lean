@@ -11,7 +11,10 @@ Theorems to prove (taken from NumPy docs):
    where the non-: entries are successively taken (with all other non-: entries replaced by :).
    Thus, x[ind1, ..., ind2,:] acts like x[ind1][..., ind2, :] under basic slicing.
 
-2. ...TODO...
+2. Advanced indices always are broadcast and iterated as one:
+result[i_1, ..., i_M] == x[ind_1[i_1, ..., i_M], ind_2[i_1, ..., i_M],
+                           ..., ind_N[i_1, ..., i_M]]
+3. ...TODO...
 -/
 
 namespace TensorLib
@@ -24,7 +27,7 @@ inductive NumpyItem where
 | slice (slice : Slice)
 | ellipsis
 | newaxis
-deriving BEq
+deriving BEq, Repr
 
 abbrev NumpyBasic := List NumpyItem
 
@@ -124,6 +127,21 @@ deriving Inhabited, Repr
 
 namespace BasicIter
 
+-- An iterator is compatible with a shape if all of the shape's dimensions are
+-- larger than the constant indices and equal to the iterator indices.
+private def compatibleWith (iter : BasicIter) (shape : Shape) : Bool :=
+  let rec loop := fun
+  | [], [] => true
+  | .nat n :: basic, dim :: shape => n < dim && loop basic shape
+  | .slice iter :: basic, dim :: shape => iter.dim == dim && loop basic shape
+  | _, _ => false
+  loop iter.basic shape
+
+def make (shape : Shape) (basic : Basic) : Err BasicIter :=
+  let iter := BasicIter.mk basic.reverse false
+  -- if !(compatibleWith iter shape.reverse) then .error s!"shape/index mismatch: {shape} : {basic.repr 100}" else
+  .ok iter
+
 def hasNext (iter : BasicIter) : Bool := !iter.done
 
 -- How many iterations total, based purely on the shapes, not where we are in the iteration
@@ -134,16 +152,6 @@ def size (iter : BasicIter) : Nat := Id.run do
       | .nat _ => ()
       | .slice slice => res := res * slice.size
   return res
-
--- An iterator is compatible with a shape if all of the shape's dimensions are
--- larger than the constant indices and equal to the iterator indices.
-private def compatibleWith (iter : BasicIter) (shape : Shape) : Bool :=
-  let rec loop := fun
-  | [], [] => true
-  | .nat n :: basic, dim :: shape => n < dim && loop basic shape
-  | .slice iter :: basic, dim :: shape => iter.dim == dim && loop basic shape
-  | _, _ => false
-  loop iter.basic shape
 
 -- The (reversed) current index iteration (not yet returned)
 private def current (basic : Basic) : List Nat := match basic with
@@ -181,11 +189,6 @@ def next (iter : BasicIter) : Option (List Nat × BasicIter) :=
   | some basic => { iter with basic }
   some (ns, basic)
 
-def make (shape : Shape) (basic : Basic) : Err BasicIter :=
-  let iter := BasicIter.mk basic.reverse false
-  if !(compatibleWith iter shape.reverse) then .error "shape/index mismatch" else
-  .ok iter
-
 instance [Monad m] : ForIn m BasicIter (List Nat) where
   forIn {α} [Monad m] (iter : BasicIter) (x : α) (f : List Nat -> α -> m (ForInStep α)) : m α := do
     let mut iter : BasicIter := iter
@@ -216,6 +219,60 @@ def applyWithCopy (index : NumpyBasic) (arr : Tensor) : Err Tensor := do
      shape := newShape,
      data
   }
+
+/-
+Make an attempt to not copy. For example, a partial index into an array
+should probably just return a view with the same (sub) strides.
+This is currently a feeble attempt, but can get fancier over time.
+We currently handle
+
+1. Non-slice indices (e.g. arr[1][7][-2])
+2. TODO
+-/
+def apply (index : NumpyBasic) (arr : Tensor) : Err (Tensor × Bool) := do
+  let oldShape := arr.shape
+  let mut startIndex := arr.startIndex
+  let mut needsCopy := false
+  let (basic, newShape) <- toBasic index oldShape
+  let basic := basic.take index.length -- drop any implicit "full" slices
+  for ind in List.zip basic arr.unitStrides do
+    match ind with
+    | (.nat n, stride) =>
+      startIndex := (startIndex + stride * n).toNat -- TODO: worry about underflow here?
+    | _ =>
+      needsCopy := true
+      break
+  if needsCopy then do
+    let res <- applyWithCopy index arr
+    return (res, true)
+  else
+    let res := { arr with
+      shape := newShape,
+      startIndex,
+      unitStrides := arr.unitStrides.drop basic.length
+    }
+    return (res, false)
+
+#eval let tp := BV8
+      let tensor := Tensor.Element.arange tp 10
+      let tensor := tensor.reshape! [2, 5]
+      let index := [.int 1]
+      let res := get! $ applyWithCopy index tensor
+      Tensor.str tp res
+
+#eval let tp := BV8
+      let tensor := Tensor.Element.arange tp 10
+      let tensor := tensor.reshape! [2, 5]
+      let index := [.int 1]
+      let (res, copied) := get! $ apply index tensor
+      (Tensor.str tp res, copied)
+
+#eval let tp := BV8
+      let tensor := Tensor.Element.arange tp 20
+      let tensor := tensor.reshape! [2, 2, 5]
+      let index := [.int 1, .int 1, .int 4]
+      let (res, copied) := get! $ apply index tensor
+      (Tensor.str tp res, copied)
 
 section Test
 

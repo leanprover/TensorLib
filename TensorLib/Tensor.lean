@@ -94,7 +94,7 @@ structure Tensor where
   dtype : Dtype
   -- `dataOrder` is private because it's not currently being used. It is not removed because is a fixture
   -- in NumPy and we'll likely need it for even small improvements to our logic of when to copy or not.
-  private dataOrder : DataOrder := DataOrder.C
+  dataOrder : DataOrder := DataOrder.C
   shape : Shape
   data : ByteArray
   startIndex : Nat := 0 -- Pointer to the first byte of ndarray data. This is implicit in the `data` pointer in numpy.
@@ -111,6 +111,25 @@ def isTriviallyReshapable (arr : Tensor) : Bool :=
 
 def empty (dtype : Dtype) (shape : Shape) : Tensor :=
   let data := ByteArray.mkEmpty (dtype.itemsize * shape.count)
+  { dtype := dtype, shape := shape, data := data }
+
+def zeros (dtype : Dtype) (shape : Shape) : Tensor := Id.run do
+  let size := dtype.itemsize * shape.count
+  let mut data := ByteArray.mkEmpty size
+  for _ in [0:size] do
+    data := data.push 0
+  { dtype := dtype, shape := shape, data := data }
+
+def ones (dtype : Dtype) (shape : Shape) : Tensor := Id.run do
+  let size := dtype.itemsize * shape.count
+  let itemsize := dtype.itemsize
+  let mut data := ByteArray.mkEmpty size
+  for i in [0:size] do
+    let byte := match dtype.order with
+    | .oneByte => 1
+    | .littleEndian => if i.mod itemsize == 0 then 1 else 0
+    | .bigEndian => if i.mod itemsize == itemsize - 1 then 1 else 0
+    data := data.push byte
   { dtype := dtype, shape := shape, data := data }
 
 --! number of dimensions
@@ -265,7 +284,7 @@ def arange (a : Type) [w : Element a] (n : Nat) : Tensor :=
 -- This is a blind index into the array, disregarding the shape.
 def getPosition [typ : Element a] (x : Tensor) (position : ℕ) : Err a :=
   if typ.itemsize != x.itemsize then .error "byte size mismatch" else -- TODO: Lift this check out so we only do it once
-  typ.fromByteArray x.data (x.startIndex + (position * typ.itemsize))
+  typ.fromByteArray x.data (position * typ.itemsize)
 
 def setPosition [typ : Element a] (x : Tensor) (n : ℕ) (v : a): Err Tensor :=
   let itemsize := typ.itemsize
@@ -459,6 +478,11 @@ private def arr0 := Element.arange BV8 8
 private def arr1 := Element.arange BV8 12
 #guard get! ((arr1.copyAndReshape! [2, 6]).toTree BV8) == .node [.root [0, 1, 2, 3, 4, 5], .root [6, 7, 8, 9, 10, 11]]
 #guard get! ((arr1.copyAndReshape! [2, 3, 2]).toTree BV8) == .node [.node [.root [0, 1], .root [2, 3], .root [4, 5]], .node [.root [6, 7], .root [8, 9], .root [10, 11]]]
+
+#guard (zeros (Dtype.float64) [2, 2]).nbytes == 2 * 2 * 8
+#guard (zeros (Dtype.float64) [2, 2]).data.toList.count 0 == 2 * 2 * 8
+#guard (ones (Dtype.float64) [2, 2]).nbytes == 2 * 2 * 8
+#guard (ones (Dtype.float64) [2, 2]).data.toList.count 1 == 2 * 2
 
 end Test
 

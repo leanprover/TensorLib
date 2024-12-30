@@ -106,7 +106,7 @@ structure Slice where
   stop : Option Int
   step : Option Int
   stepNz : step ≠ .some 0
-deriving BEq
+deriving BEq, Repr
 
 instance : Inhabited Slice where
   default := Slice.mk .none .none .none (by simp)
@@ -133,6 +133,14 @@ def all : Slice :=
 def ofInt (n : Int) : Slice :=
   let stepNz : Option.none ≠ .some (0:Int) := by trivial
   Slice.mk (.some n) .none .none stepNz
+
+def ofStop (n : Int) : Slice :=
+  let stepNz : Option.none ≠ .some (0:Int) := by trivial
+  Slice.mk (.some 0) (.some n) .none stepNz
+
+def ofStartStop (start stop : Int) : Slice :=
+  let stepNz : Option.none ≠ .some (0:Int) := by trivial
+  Slice.mk (.some start) (.some stop) .none stepNz
 
 def dir (s : Slice): Dir := match s.step with
   | .none => Dir.Forward
@@ -388,6 +396,7 @@ private def toList (iter : Iter) : List Nat := Id.run do
 #guard (Iter.make (Slice.build! (.some 3) .none .none) 5).toList == [3, 4]
 #guard (Iter.make (Slice.build! .none .none (.some (-1))) 5).toList == [4, 3, 2, 1, 0]
 
+/- Testing code left in for debugging
 #eval do
   let i0 := Iter.make Slice.all 3
   let (n0, i1) <- i0.next
@@ -395,7 +404,8 @@ private def toList (iter : Iter) : List Nat := Id.run do
   let (n2, i3) <- i2.next
   --let (n3, i4) <- i3.next
   return (i0, n0, i1, n1, i2, n2, i3) -- , n3, i4)
-end Iter
+-/
 
+end Iter
 end Slice
 end TensorLib

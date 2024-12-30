@@ -25,6 +25,20 @@ private def binop (a : Type) [Element a] (x y : Tensor) (op : a -> a -> Err a) :
 def add (a : Type) [Add a] [Element a] (x y : Tensor) : Err Tensor :=
   binop a x y (fun x y => .ok (x + y))
 
+def sub (a : Type) [Sub a] [Element a] (x y : Tensor) : Err Tensor :=
+  binop a x y (fun x y => .ok (x - y))
+
+def mul (a : Type) [Mul a] [Element a] (x y : Tensor) : Err Tensor :=
+  binop a x y (fun x y => .ok (x * y))
+
+def div (a : Type) [Div a] [Element a] (x y : Tensor) : Err Tensor :=
+  binop a x y (fun x y => .ok (x / y))
+
+/-
+TODO:
+- np.sum. Prove that np.sum(x, axis=(2, 4, 6)) == np.sum(np.sum(np.sum(x, axis=6), axis=4), axis=2) # and other variations
+-/
+
 #eval
   let x := (Element.arange BV8 10)
   let arr := add BV8 x x

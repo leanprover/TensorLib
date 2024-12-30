@@ -223,6 +223,7 @@ def allDimIndices (shape : Shape) : List DimIndex :=
   let (position, indices) := shape.count.iterate foldFn (0, [])
   if position < count then [] else indices.reverse
 
+#guard allDimIndices [5] == [[0], [1], [2], [3], [4]]
 #guard allDimIndices [3, 2] == [[0, 0], [0, 1], [1, 0], [1, 1], [2, 0], [2, 1]]
 
 end Shape
@@ -328,6 +329,8 @@ end DimsIter
 
 abbrev BV8 := BitVec 8
 
+def BV8.ofNat (i : Nat) : BV8 := i.toUInt8.toBitVec
+
 -- `_root_` is required to add dot methods to UInt8, which is outside TensorLib
 def _root_.UInt8.toBV8 (n : UInt8) : BV8 := BitVec.ofFin n.val
 def BV8.toUInt8 (n : BV8) : UInt8 := UInt8.ofNat n.toFin
@@ -340,7 +343,7 @@ def ByteArray.toBV8 (x : ByteArray) (startIndex : Nat) : Err BV8 :=
     let H0 : n + 0 < x.size := by omega
     let x0 := x.get (Fin.mk _ H0)
     .ok (UInt8.toBV8 x0)
-  else .error "Index out of range"
+  else .error s!"Index out of range: {n}"
 
 abbrev BV16 := BitVec 16
 
@@ -379,7 +382,7 @@ def ByteArray.toBV16 (x : ByteArray) (startIndex : Nat) (order : ByteOrder) : Er
     | .oneByte => .error "illegal byte order"
     | .littleEndian => .ok (BV16.ofBytes x0.toBV8 x1.toBV8)
     | .bigEndian => .ok (BV16.ofBytes x1.toBV8 x0.toBV8)
-  else .error "Index out of range"
+  else .error s!"Index out of range: {n}"
 
 def BV16.toByteArray (x : BV16) (ord : ByteOrder) : ByteArray :=
   let (x0, x1) := x.toBytes
@@ -436,7 +439,7 @@ def ByteArray.toBV32 (x : ByteArray) (startIndex : Nat) (order : ByteOrder) : Er
     | .oneByte => .error "illegal byte order"
     | .littleEndian => .ok (BV32.ofBytes x0.toBV8 x1.toBV8 x2.toBV8 x3.toBV8)
     | .bigEndian => .ok (BV32.ofBytes x3.toBV8 x2.toBV8 x1.toBV8 x0.toBV8)
-  else .error "Index out of range"
+else .error s!"Index out of range: {n}"
 
 def BV32.toByteArray (x : BV32) (ord : ByteOrder) : ByteArray :=
   let (x0, x1, x2, x3) := x.toBytes
@@ -447,6 +450,8 @@ def BV32.toByteArray (x : BV32) (ord : ByteOrder) : ByteArray :=
   (arr.map BV8.toUInt8).toByteArray
 
 abbrev BV64 := BitVec 64
+
+def BV64.ofNat (i : Nat) : BV64 := i.toUInt64.toBitVec
 
 def BV64.toBytes (n : BV64) : BV8 × BV8 × BV8 × BV8 × BV8 × BV8 × BV8 × BV8 :=
   let n0 := (n >>> 0o00 &&& 0xFF).truncate 8
@@ -512,7 +517,7 @@ def ByteArray.toBV64 (x : ByteArray) (startIndex : Nat) (order : ByteOrder) : Er
     | .oneByte => .error "illegal byte order"
     | .littleEndian => .ok (BV64.ofBytes x0.toBV8 x1.toBV8 x2.toBV8 x3.toBV8 x4.toBV8 x5.toBV8 x6.toBV8 x7.toBV8)
     | .bigEndian => .ok (BV64.ofBytes x7.toBV8 x6.toBV8 x5.toBV8 x4.toBV8 x3.toBV8 x2.toBV8 x1.toBV8 x0.toBV8)
-  else .error "Index out of range"
+  else .error s!"Index out of range: {n}"
 
 def BV64.toByteArray (x : BV64) (ord : ByteOrder) : ByteArray :=
   let (x0, x1, x2, x3, x4, x5, x6, x7) := x.toBytes
