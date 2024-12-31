@@ -63,7 +63,7 @@ def mgrid (slices : List Slice) : Err Tensor := do
       let sz := sliceSize slice
       slicesShape := sz :: slicesShape
   let shape := sliceCount :: slicesShape
-  let dtype := Dtype.uint8 --uint64
+  let dtype := Dtype.uint64
   let mut arr := Tensor.zeros dtype shape
   let basic := slices.map fun s => .slice (Slice.Iter.make s arbitrary)
   let mut sliceIter <- Index.BasicIter.make slicesShape basic
@@ -76,10 +76,54 @@ def mgrid (slices : List Slice) : Err Tensor := do
       sliceIter := sliceIter'
       if values.length != sliceCount then .error "Invariant failure: value length mismatch"
       for (i, v) in (List.range sliceCount).zip values do
-        let value := BV8.ofNat v -- BV64
+        let value := BV64.ofNat v
         arr <- Tensor.Element.setDimIndex arr (i :: index) value
   return arr
 
-#eval (get! (mgrid [Slice.ofStartStop 2 4, Slice.ofStartStop 4 7]))--.str BV8
+section Test
 
+open TensorLib.Tensor.Format
+open Tree
+
+#guard (get! (mgrid [Slice.ofStartStop 2 4, Slice.ofStartStop 4 7])).toTree BV64 == .ok (
+  .node [
+    .node [
+      .root [2, 2, 2], .root [3, 3, 3]
+    ],
+    .node [
+      .root [4, 5, 6], .root [4, 5, 6]
+    ]
+  ]
+)
+
+#guard (get! (mgrid [Slice.ofStartStop 2 4, Slice.ofStartStop 4 7, Slice.ofStop 2])).toTree BV64 == .ok (
+  .node [
+    .node [
+      .node [
+        .root [2, 2], .root [2, 2], .root [2, 2]
+      ],
+      .node [
+        .root [3, 3], .root [3, 3], .root [3, 3]
+      ],
+    ],
+    .node [
+      .node [
+        .root [4, 4], .root [5, 5], .root [6, 6]
+      ],
+      .node [
+        .root [4, 4], .root [5, 5], .root [6, 6]
+      ]
+    ],
+    .node [
+      .node [
+        .root [0, 1], .root [0, 1], .root [0, 1]
+      ],
+      .node [
+        .root [0, 1], .root [0, 1], .root [0, 1]
+      ]
+    ]
+  ]
+)
+
+end Test
 end TensorLib

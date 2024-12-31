@@ -1,3 +1,4 @@
+import Mathlib
 import TensorLib.Common
 import TensorLib.Tensor
 import TensorLib.Broadcast
@@ -38,6 +39,75 @@ def div (a : Type) [Div a] [Element a] (x y : Tensor) : Err Tensor :=
 TODO:
 - np.sum. Prove that np.sum(x, axis=(2, 4, 6)) == np.sum(np.sum(np.sum(x, axis=6), axis=4), axis=2) # and other variations
 -/
+
+-- Sum with no axis. Adds all the elements.
+private def sum0 (a : Type) [Add a] [Zero a] [Element a] (arr : Tensor) : Err Tensor := do
+  let mut acc : a := 0
+  let mut iter := DimsIter.make arr.shape
+  for index in iter do
+    let n : a <- Element.getDimIndex arr index
+    acc := Add.add acc n
+  return Element.arrayScalar acc
+
+-- Sum with a single axis.
+def sum1 (a : Type) [Add a] [Zero a] [Element a] (arr : Tensor) (axis : Nat) : Err Tensor := do
+  if arr.ndim <= axis then .error "axis out of range" else
+  let oldshape := arr.shape
+  let (leftShape, rightShape) := oldshape.splitAt axis
+  match rightShape with
+  | [] => .error "Invariant failure"
+  | dim :: dims =>
+    let rightShape := dims
+    let newshape := leftShape ++ rightShape
+    let mut res := Tensor.zeros arr.dtype newshape
+    let mut iter := DimsIter.make newshape
+    for index in iter do
+      let mut acc : a := 0
+      for i in [0:dim] do
+        let index' := index.insertIdx axis i
+        let v : a <- Element.getDimIndex arr index'
+        acc := acc + v
+      res <- Element.setDimIndex res index acc
+    return res
+
+private def uniq [BEq a] (xs : List a) : Bool := match xs with
+| [] | [_] => true
+| x1 :: x2 :: xs => x1 != x2 && uniq (x2 :: xs)
+
+def sum (a : Type) [Add a] [Zero a] [Element a] (arr : Tensor) (axes : Option (List Nat)) : Err Tensor :=
+  match axes with
+  | .none => sum0 a arr
+  | .some axes =>
+  if !(uniq axes) then .error "Duplicate axis elements" else
+  let axes := (List.mergeSort axes).reverse
+  match axes with
+  | [] => sum0 a arr
+  | axis :: axes => do
+    let mut res <- sum1 a arr axis
+    let rec loop (axes : List Nat) (acc : Tensor) : Err Tensor := match axes with
+    | [] => .ok acc
+    | axis :: axes => do
+      let acc <- sum1 a acc axis
+      let axes := axes.map fun n => n-1 -- When we remove an axis, all later axes point to one dimension less
+      loop axes acc
+    termination_by axes.length
+    loop axes res
+
+#eval do
+  let typ := BV8
+  let x <- (Element.arange typ 10).reshape [2, 5]
+  let x1 <- sum typ x .none
+  let x2 <- sum typ x (.some [0])
+  let x3 <- sum typ x (.some [1])
+  return (x1, x2, x3)
+
+#eval
+  let typ := BV8
+  let x := (Element.arange typ 10)
+  ( sum typ x .none,
+    sum typ x (.some []),
+    sum1 typ x 0,
+    sum typ x (.some [0]) )
 
 #eval
   let x := (Element.arange BV8 10)
