@@ -99,7 +99,9 @@ def sum (a : Type) [Add a] [Zero a] [Element a] (arr : Tensor) (axes : Option (L
   let x1 <- sum typ x .none
   let x2 <- sum typ x (.some [0])
   let x3 <- sum typ x (.some [1])
-  return (x1, x2, x3)
+  let x4 <- sum typ x (.some [1, 0])
+  let x5 <- sum typ x (.some [0, 1])
+  return (x1, x2, x3, x4, x5)
 
 #eval
   let typ := BV8
