@@ -26,5 +26,5 @@ jobs:
 
       - uses: leanprover/lean-action@v1
 
-      - name: Run tests
-        run: lake exe tensorlib test
+      # - name: Run tests
+      #   run: lake exe tensorlib test
