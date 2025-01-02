@@ -137,6 +137,7 @@ Strides also are empty for scalar arrays.
 -/
 structure Shape where
   val : List Nat
+deriving Repr, Inhabited
 
 namespace Shape
 
