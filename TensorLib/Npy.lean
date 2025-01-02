@@ -144,12 +144,6 @@ def dataSize (header : Header): Nat := header.descr.itemsize * header.shape.coun
 
 end Header
 
--- We generally have large tensors, so don't show them by default
-local instance ByteArrayRepr : Repr ByteArray where
-  reprPrec x _ :=
-    let s := toString x.size
-    s!"ByteArray of size {s}"
-
 structure Ndarray where
   header : Header
   data : ByteArray
