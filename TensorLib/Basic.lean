@@ -6,3 +6,4 @@ Authors: Jean-Baptiste Tristan, Paul Govereau, Sean McLaughlin
 
 import TensorLib.Common
 import TensorLib.Dtype
+import TensorLib.Npy
