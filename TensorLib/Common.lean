@@ -133,11 +133,12 @@ Strides also are empty for scalar arrays.
 ()
 ```
 
--- Shape is independent of the size of the dtype.
+Shape is independent of the size of the dtype.
+TODO: Consider adding Coe instance for List Nat?
 -/
 structure Shape where
   val : List Nat
-deriving Repr, Inhabited
+deriving BEq, Repr, Inhabited
 
 namespace Shape
 
