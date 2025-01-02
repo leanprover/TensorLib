@@ -10,3 +10,4 @@ import TensorLib.Npy
 import TensorLib.Broadcast
 import TensorLib.Slice
 import TensorLib.Tensor
+import TensorLib.Index
