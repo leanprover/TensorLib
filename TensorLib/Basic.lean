@@ -9,3 +9,4 @@ import TensorLib.Dtype
 import TensorLib.Npy
 import TensorLib.Broadcast
 import TensorLib.Slice
+import TensorLib.Tensor
