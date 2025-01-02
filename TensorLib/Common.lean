@@ -27,6 +27,12 @@ def natDivCeil (num denom : Nat) : Nat := (num + denom - 1) / denom
 
 def natProd (shape : List Nat) : Nat := shape.foldl (fun x y => x * y) 1
 
+-- We generally have large tensors, so don't show them by default
+instance ByteArrayRepr : Repr ByteArray where
+  reprPrec x _ :=
+    if x.size < 100 then x.toList.repr 100 else
+    s!"ByteArray of size {x.size}"
+
 /-!
 NumPy arrays can be stored in big-endian or little-endian order on disk, regardless
 of the architecture of the machine saving the array. Since we read these arrays
@@ -39,14 +45,10 @@ inductive ByteOrder where
 | bigEndian
 deriving BEq, Repr, Inhabited
 
-namespace ByteOrder
-
 @[simp]
-def isMultiByte (x : ByteOrder) : Bool := match x with
+def ByteOrder.isMultiByte (x : ByteOrder) : Bool := match x with
 | .oneByte => false
 | .littleEndian | .bigEndian => true
-
-end ByteOrder
 
 /-!
 The strides are how many bytes you need to skip to get to the next element in that
@@ -142,12 +144,16 @@ deriving BEq, Repr, Inhabited
 
 namespace Shape
 
+def empty : Shape := Shape.mk []
+
 --! The number of elements in a tensor. All that's needed is the shape for this calculation.
 -- TODO: Put this in the struct?
 def count (shape : Shape) : Nat := natProd shape.val
 
 --! Number of dimensions
 def ndim (shape : Shape) : Nat := shape.val.length
+
+def map (shape : Shape) (f : List Nat -> List Nat) : Shape := Shape.mk (f shape.val)
 
 /-!
 Strides can be computed from the shape by figuring out how many elements you
