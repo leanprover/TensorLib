@@ -13,3 +13,4 @@ import TensorLib.Tensor
 import TensorLib.Index
 import TensorLib.Mgrid
 import TensorLib.Ufunc
+import TensorLib.Test
