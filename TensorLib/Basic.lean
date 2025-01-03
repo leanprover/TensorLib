@@ -12,3 +12,4 @@ import TensorLib.Slice
 import TensorLib.Tensor
 import TensorLib.Index
 import TensorLib.Mgrid
+import TensorLib.Ufunc
