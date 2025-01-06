@@ -4,7 +4,7 @@ Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Jean-Baptiste Tristan, Paul Govereau, Sean McLaughlin
 -/
 
-import Batteries.Data.List
+import Batteries.Data.List -- for `toChunks`
 import TensorLib.Common
 import TensorLib.Dtype
 import TensorLib.Npy
@@ -108,6 +108,8 @@ def ones (dtype : Dtype) (shape : Shape) : Tensor := Id.run do
     data := data.push byte
   { dtype := dtype, shape := shape, data := data }
 
+def byteOrder (arr : Tensor) : ByteOrder := arr.dtype.order
+
 --! number of dimensions
 def ndim (x : Tensor) : Nat := x.shape.ndim
 
@@ -126,10 +128,34 @@ def dimIndexToOffset (x : Tensor) (i : DimIndex) : Int :=
 
 --! Get the starting byte corresponding to a DimIndex
 def dimIndexToPosition (x : Tensor) (i : DimIndex) : Nat :=
-  (x.dimIndexToOffset i).toNat
+  (x.startIndex + (x.dimIndexToOffset i)).toNat
 
 --! number of bytes representing the entire tensor
 def nbytes (x : Tensor) : Nat := x.itemsize * x.size
+
+def isIntLike (x : Tensor) : Bool := x.dtype.isIntLike
+
+def dimIndexInRange (arr : Tensor) (dimIndex : DimIndex) : Bool := arr.shape.dimIndexInRange dimIndex
+
+def byteArrayAtDimIndex (arr : Tensor) (dimIndex : DimIndex) : Err ByteArray := do
+  if !arr.dimIndexInRange dimIndex then .error "index is incompatible with tensor shape" else
+  let posn := arr.dimIndexToPosition dimIndex
+  .ok $ arr.data.extract posn (posn + arr.itemsize)
+
+def setByteArrayAtDimIndex (arr : Tensor) (dimIndex : DimIndex) (bytes : ByteArray) : Err Tensor := do
+  if !arr.dimIndexInRange dimIndex then .error "index is incompatible with tensor shape" else
+  if arr.itemsize != bytes.size then .error "byte size mismatch" else
+  let posn := arr.dimIndexToPosition dimIndex
+  .ok $ { arr with data := bytes.copySlice 0 arr.data posn bytes.size }
+
+/-!
+Return the integer at the dimIndex. This is useful, for example, in advanced indexing
+where we must have an int/uint Tensor as an argument.
+-/
+def intAtDimIndex (arr : Tensor) (dimIndex : DimIndex) : Err Int := do
+  if !arr.isIntLike then .error "natAt expects an int tensor" else
+  let bytes <- byteArrayAtDimIndex arr dimIndex
+  .ok $ arr.byteOrder.bytesToInt bytes
 
 /-!
 Copy a Tensor's data to new, contiguous storage.
@@ -267,6 +293,16 @@ def setPosition [typ : Element a] (x : Tensor) (n : Nat) (v : a): Err Tensor :=
   let posn := n * itemsize
   .ok { x with data := bytes.copySlice 0 x.data posn itemsize true }
 
+def ofList (typ : Element a) (xs : List a) : Tensor := Id.run do
+  let arr := Tensor.zeros typ.dtype (Shape.mk [xs.length])
+  let mut data := arr.data
+  let mut posn := 0
+  for x in xs do
+    let v := typ.toByteArray x
+    data := v.copySlice 0 data posn typ.itemsize
+    posn := posn + arr.itemsize
+  { arr with data := data }
+
 -- Since the DimIndex is independent of the dtype size, we need to recompute the strides
 -- TODO: Would be better to not recompute this over and over. We should find a place to store
 -- the 1-based default strides
@@ -284,8 +320,7 @@ def setDimIndex [Element a] (x : Tensor) (index : DimIndex) (v : a): Err Tensor 
 
 -- TODO: remove `Err` by proving all indices are within range
 def toList (a : Type) [Tensor.Element a] (x : Tensor) : Err (List a) :=
-  let traverseFn ind : Err a := getDimIndex x ind
-  x.shape.allDimIndices.traverse traverseFn
+  x.shape.allDimIndices.mapM (getDimIndex x)
 
 def toList! (a : Type) [Tensor.Element a] (x : Tensor) : List a := match toList a x with
 | .error _ => []
@@ -297,6 +332,15 @@ instance BV8Native : Element BV8 where
   ofNat n := n
   toByteArray (x : BV8) : ByteArray := x.toByteArray
   fromByteArray arr startIndex := ByteArray.toBV8 arr startIndex
+
+instance Int8Native : Element Int8 where
+  dtype := Dtype.mk .int8 .oneByte
+  itemsize := 1
+  ofNat n := n.toInt8
+  toByteArray (x : Int8) : ByteArray := [x.toUInt8].toByteArray
+  fromByteArray arr startIndex := (ByteArray.toBV8 arr startIndex).map fun b => Int8.mk b.toUInt8
+
+#guard Int8Native.fromByteArray (Int8Native.toByteArray (-5)) 0 == .ok (-5)
 
 instance BV16Little : Element BV16 where
   dtype := Dtype.mk .uint16 .littleEndian
@@ -344,7 +388,7 @@ private def toTree {a : Type} (x : List a) (strides : Strides) : Err (Tree a) :=
   | [_] => .error "not a unit stride"
   | stride :: strides => do
     let chunks := x.toChunks stride.toNat
-    let res <- chunks.traverse (fun x => toTree x strides)
+    let res <- chunks.mapM (fun x => toTree x strides)
     return .node res
 
 private def toTree! {a : Type} (x : List a) (strides : Strides) : Tree a := match toTree x strides with
@@ -456,6 +500,9 @@ private def arr1 := Element.arange BV8 12
 #guard (zeros (Dtype.float64) $ Shape.mk [2, 2]).data.toList.count 0 == 2 * 2 * 8
 #guard (ones (Dtype.float64) $ Shape.mk [2, 2]).nbytes == 2 * 2 * 8
 #guard (ones (Dtype.float64) $ Shape.mk [2, 2]).data.toList.count 1 == 2 * 2
+
+#guard get! ((Element.ofList Element.BV8Native [1, 2, 3]).toTree BV8) == Format.Tree.root [1, 2, 3]
+#guard get! (((Element.ofList Element.BV8Native [0, 1, 2, 3, 4, 5]).reshape! (Shape.mk [2, 3])).toTree BV8) == .node [.root [0, 1, 2], .root [3, 4, 5]]
 
 end Test
 
