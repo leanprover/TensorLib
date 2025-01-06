@@ -39,6 +39,8 @@ Rule 2
 
 A: (3, 2, 7)
 B: (3, 2, 7)
+
+Theorem to prove: If we can broadcast s1 to s2, then given an array with shape s1, then s1.reshape s2 succeeds
 -/
 
 namespace TensorLib
@@ -102,5 +104,24 @@ def canBroadcast (b : Broadcast) : Bool := (broadcast b).isSome
  oneExtendPrefix b1 == b1 &&
  broadcast b2 == broadcast b1 &&
  broadcast b2 == .some (Shape.mk [1, 2, 3])
+
+def broadcastList (shapes : List Shape) : Option Shape := Id.run do
+  match shapes with
+  | [] => none
+  | shape :: shapes =>
+  let mut shape := shape
+  for s in shapes do
+    let b := Broadcast.mk shape s
+    match b.broadcast with
+    | .none => return .none
+    | .some s =>
+      shape := s
+  return shape
+
+#guard
+ let x1 := Shape.mk [1, 2, 3]
+ let x2 := Shape.mk [2, 3]
+ let x3 := Shape.mk []
+ broadcastList [x1, x2, x3] == .some x1
 
 end Broadcast

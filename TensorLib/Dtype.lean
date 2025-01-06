@@ -34,6 +34,16 @@ def isMultiByte (x : Name) : Bool := match x with
 | bool | int8 | uint8 => false
 | _ => true
 
+def isInt (x : Name) : Bool := match x with
+| int8 | int16 | int32 | int64 => true
+| _ => false
+
+def isUint (x : Name) : Bool := match x with
+| uint8 | uint16 | uint32 | uint64 => true
+| _ => false
+
+def isIntLike (x : Name) : Bool := x.isInt || x.isUint
+
 --! Number of bytes used by each element of the given dtype
 def itemsize (x : Name) : Nat := match x with
 | float64 | int64 | uint64 => 8
@@ -56,6 +66,10 @@ def byteOrderOk (x : Dtype) : Prop := !x.name.isMultiByte || (x.name.isMultiByte
 def itemsize (t : Dtype) := t.name.itemsize
 
 def sizedStrides (dtype : Dtype) (s : Shape) : Strides := List.map (fun x => x * dtype.itemsize) s.unitStrides
+
+def isInt (dtype : Dtype) : Bool := dtype.name.isInt
+def isUint (dtype : Dtype) : Bool := dtype.name.isUint
+def isIntLike (dtype : Dtype) : Bool := dtype.isInt || dtype.isUint
 
 def int8 : Dtype := Dtype.mk Dtype.Name.int8 ByteOrder.littleEndian
 def uint8 : Dtype := Dtype.mk Dtype.Name.uint8 ByteOrder.littleEndian

@@ -4,12 +4,19 @@ Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Jean-Baptiste Tristan, Paul Govereau, Sean McLaughlin
 -/
 
+import TensorLib.Broadcast
 import TensorLib.Common
-import TensorLib.Tensor
-import TensorLib.Slice
 import TensorLib.Npy
+import TensorLib.Slice
+import TensorLib.Tensor
 
 /-
+There are several types of indexing in NumPy.
+
+    https://numpy.org/doc/stable/user/basics.indexing.html
+
+We handle basic indexing and some types of advanced indexing.
+
 Theorems to prove (taken from NumPy docs):
 
 1. Basic slicing with more than one non-: entry in the slicing tuple,
@@ -18,7 +25,7 @@ Theorems to prove (taken from NumPy docs):
    Thus, x[ind1, ..., ind2,:] acts like x[ind1][..., ind2, :] under basic slicing.
 
 2. Advanced indices always are broadcast and iterated as one:
-result[i_1, ..., i_M] == x[ind_1[i_1, ..., i_M], ind_2[i_1, ..., i_M],
+   result[i_1, ..., i_M] == x[ind_1[i_1, ..., i_M], ind_2[i_1, ..., i_M],
                            ..., ind_N[i_1, ..., i_M]]
 3. ...TODO...
 -/
@@ -251,6 +258,8 @@ private def testReturn (iter : BasicIter) : List (List Nat) := Id.run do
   let slice := Slice.Iter.make Slice.all 5
   testReturn (get! $ BasicIter.make shape [.slice slice, .slice slice]) == [[0, 0], [0, 1], [0, 2]]
 
+end BasicIter
+
 def applyWithCopy (index : NumpyBasic) (arr : Tensor) : Err Tensor := do
   let itemsize := arr.itemsize
   let oldShape := arr.shape
@@ -301,6 +310,94 @@ def apply (index : NumpyBasic) (arr : Tensor) : Err (Tensor × Bool) := do
     }
     return (res, false)
 
+/-
+For advanced indexing, the all-multidimensional-array case is relatively easy;
+broadcast all arguments to the same shape, then select the elements of the original
+array one by one. For example
+
+# x = np.arange(6).reshape(2, 3)
+# x
+array([[0, 1, 2],
+       [3, 4, 5]])
+# i0 = np.array([1, 0])[:, None]
+# ii = np.array([1, 2, 0])[None, :]
+# x[i0, i1]
+array([[4, 5, 3],
+       [1, 2, 0]])
+
+To obtain the later result, we simply walk through the [2, 3]-shaped indices
+[[x[1, 1], x[1, 2], x[1, 0]],
+ [x[0, 1], x[0, 2], x[0, 0]],
+
+This also works when the dims of the index is smaller than the dims
+of the array. Each x[i, j] is just an array instead of a scalar. We do not currently
+implement that, but if we need it it will be clear what to do; we just copy the (contiguous)
+bytes of the sub-array.
+
+Mixing basic and advanced indexing is complex: https://numpy.org/doc/stable/user/basics.indexing.html#combining-advanced-and-basic-indexing
+While I can follow the individual examples, the general case is some work.
+As a simple example of mixing, they give `x[..., ind, :]` where
+`x.shape` is `(10, 20, 30)` and `ind` is a `(2, 5, 2)`-shaped indexing array.
+The result has shape `(10, 2, 5, 2, 30)` and `result[..., i, j, k, :] = x[..., ind[i, j, k], :]`.
+While this example is understandable, things get more complex, and I've not yet seen
+examples we currently want to support that uses them. Therefore, we do not currently implement
+mixed basic/advanced indexing.
+-/
+
+namespace Advanced
+
+def apply (indexTensors : List Tensor) (arr : Tensor) : Err Tensor := do
+  if indexTensors.any fun arr => !arr.isIntLike then .error "Index arrays must have an int-like type" else
+  if indexTensors.length != arr.ndim then .error "advanced indexing length mismatch"
+  -- Reshape all the input tesnsors
+  match Broadcast.broadcastList (indexTensors.map fun arr => arr.shape) with
+  | none => .error "input shapes must be broadcastable"
+  | some outShape =>
+  let mut reshapedIndexTensors := []
+  for indexTensor in indexTensors do
+    let indexTensor <- indexTensor.reshape outShape -- should never fail since broadcastList succeeds
+    reshapedIndexTensors := indexTensor :: reshapedIndexTensors
+  reshapedIndexTensors := reshapedIndexTensors.reverse
+  let mut res := Tensor.zeros arr.dtype outShape
+  -- Now we will iterate over the output shape, computing the values one-by-one from the input array
+  for outDimIndex in DimsIter.make outShape do
+    -- Get the index for each dimension in the original array from the corresponding value of the index tensors
+    let mut inIntIndex : List Int := []
+    for indexTensor in reshapedIndexTensors do
+      let v <- indexTensor.intAtDimIndex outDimIndex
+      inIntIndex := v :: inIntIndex
+    let inDimIndex <- arr.shape.intIndexToDimIndex inIntIndex.reverse
+    let bytes <- arr.byteArrayAtDimIndex inDimIndex
+    res <- res.setByteArrayAtDimIndex outDimIndex bytes
+  return res
+
+/-
+0 1 2
+3 4 5
+6 7 8
+
+9 10 11
+12 12 14
+15 16 17
+
+18 19 20
+21 22 23
+24 25 26
+-/
+#guard
+  let ind0 := (Tensor.Element.ofList Tensor.Element.Int8Native [1, 2, 0, 0]).reshape! (Shape.mk [2, 2])
+  let ind1 := (Tensor.Element.ofList Tensor.Element.Int8Native [2, -2, 0, 1]).reshape! (Shape.mk [2, 2])
+  let ind2 := (Tensor.Element.ofList Tensor.Element.Int8Native [1, 1, -1, -1]).reshape! (Shape.mk [2, 2])
+  let typ := BV16
+  let arr := (Tensor.Element.arange typ 27).reshape! (Shape.mk [3, 3, 3])
+  let res := get! $ apply [ind0, ind1, ind2] arr
+  let tree := get! $ res.toTree typ
+  tree == Tensor.Format.Tree.node [.root [16, 22], .root [2, 5]]
+
+end Advanced
+
+section Test
+
 #guard
   let tp := BV8
   let tensor := Tensor.Element.arange tp 10
@@ -335,35 +432,33 @@ def apply (index : NumpyBasic) (arr : Tensor) : Err (Tensor × Bool) := do
       let tree' := Tensor.Format.Tree.root [19]
       !copied && tree == tree'
 
-section Test
-
 -- Testing
 private def numpyBasicToList (dims : List Nat) (basic : NumpyBasic) : Option (List (List Nat)) := do
   let shape := Shape.mk dims
   let (basic, _) <- (toBasic basic shape).toOption
-  let iter <- (make shape basic).toOption
+  let iter <- (BasicIter.make shape basic).toOption
   iter.toList
 
 #guard numpyBasicToList [] [] == some [[]]
 #guard numpyBasicToList [1] [.int 0] == some [[0]]
 #guard numpyBasicToList [2] [.int 0] == some [[0]]
 #guard numpyBasicToList [2] [.int 1] == some [[1]]
-#guard (numpyBasicToList [2] [.int 2]) == none
-#guard (numpyBasicToList [2] [.int (-1)]) == some [[1]]
-#guard (numpyBasicToList [2] [.int (-3)]) == none
-#guard (numpyBasicToList [4] [.slice Slice.all]) == some [[0], [1], [2], [3]]
-#guard (numpyBasicToList [4] [.slice $ Slice.build! .none .none (.some 2)]) == some [[0], [2]]
-#guard (numpyBasicToList [4] [.slice $ Slice.build! (.some (-1)) .none (.some (-2))]) == some [[3], [1]]
-#guard (numpyBasicToList [2, 2] [.int 5]) == none
-#guard (numpyBasicToList [2, 2] [.int 0]) == some [[0, 0], [0, 1]]
-#guard (numpyBasicToList [2, 2] [.int 0, .int 0]) == some [[0, 0]]
-#guard (numpyBasicToList [2, 2] [.int 0, .int 1]) == some [[0, 1]]
-#guard (numpyBasicToList [2, 2] [.int 0, .int 2]) == none
-#guard (numpyBasicToList [3, 3] [.slice Slice.all, .int 2]) == some [[0, 2], [1, 2], [2, 2]]
-#guard (numpyBasicToList [3, 3] [.int 2, .slice Slice.all]) == some [[2, 0], [2, 1], [2, 2]]
-#guard (numpyBasicToList [2, 2] [.slice Slice.all, .slice Slice.all]) == some [[0, 0], [0, 1], [1, 0], [1, 1]]
-#guard (numpyBasicToList [2, 2] [.slice (Slice.build! .none .none (.some (-1))), .slice Slice.all]) == some [[1, 0], [1, 1], [0, 0], [0, 1]]
-#guard (numpyBasicToList [4, 2] [.slice (Slice.build! .none .none (.some (-2))), .slice Slice.all]) == some [[3, 0], [3, 1], [1, 0], [1, 1]]
+#guard numpyBasicToList [2] [.int 2] == none
+#guard numpyBasicToList [2] [.int (-1)] == some [[1]]
+#guard numpyBasicToList [2] [.int (-3)] == none
+#guard numpyBasicToList [4] [.slice Slice.all] == some [[0], [1], [2], [3]]
+#guard numpyBasicToList [4] [.slice $ Slice.build! .none .none (.some 2)] == some [[0], [2]]
+#guard numpyBasicToList [4] [.slice $ Slice.build! (.some (-1)) .none (.some (-2))] == some [[3], [1]]
+#guard numpyBasicToList [2, 2] [.int 5] == none
+#guard numpyBasicToList [2, 2] [.int 0] == some [[0, 0], [0, 1]]
+#guard numpyBasicToList [2, 2] [.int 0, .int 0] == some [[0, 0]]
+#guard numpyBasicToList [2, 2] [.int 0, .int 1] == some [[0, 1]]
+#guard numpyBasicToList [2, 2] [.int 0, .int 2] == none
+#guard numpyBasicToList [3, 3] [.slice Slice.all, .int 2] == some [[0, 2], [1, 2], [2, 2]]
+#guard numpyBasicToList [3, 3] [.int 2, .slice Slice.all] == some [[2, 0], [2, 1], [2, 2]]
+#guard numpyBasicToList [2, 2] [.slice Slice.all, .slice Slice.all] == some [[0, 0], [0, 1], [1, 0], [1, 1]]
+#guard numpyBasicToList [2, 2] [.slice (Slice.build! .none .none (.some (-1))), .slice Slice.all] == some [[1, 0], [1, 1], [0, 0], [0, 1]]
+#guard numpyBasicToList [4, 2] [.slice (Slice.build! .none .none (.some (-2))), .slice Slice.all] == some [[3, 0], [3, 1], [1, 0], [1, 1]]
 
 -- Commented for easier debugging. Remove some day
 -- #eval do
@@ -380,9 +475,7 @@ private def numpyBasicToList (dims : List Nat) (basic : NumpyBasic) : Option (Li
 --   -- let (ns8, iter8) <- iter7.next
 --   -- let (ns9, iter9) <- iter8.next
 --   return (basic, iter0, ns0, iter1, ns1, iter2, ns2, iter3) -- , ns4, iter4) -- , ns5, iter5, ns6, iter6, ns7, iter7, ns8, iter8, ns9, iter9)
-
 end Test
 
-end BasicIter
 end Index
 end TensorLib
