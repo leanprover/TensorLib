@@ -320,8 +320,7 @@ def setDimIndex [Element a] (x : Tensor) (index : DimIndex) (v : a): Err Tensor 
 
 -- TODO: remove `Err` by proving all indices are within range
 def toList (a : Type) [Tensor.Element a] (x : Tensor) : Err (List a) :=
-  let traverseFn ind : Err a := getDimIndex x ind
-  x.shape.allDimIndices.traverse traverseFn
+  x.shape.allDimIndices.traverse (getDimIndex x)
 
 def toList! (a : Type) [Tensor.Element a] (x : Tensor) : List a := match toList a x with
 | .error _ => []
