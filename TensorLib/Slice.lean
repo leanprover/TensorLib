@@ -120,7 +120,7 @@ instance : Inhabited Slice where
 
 namespace Slice
 
-def build (start stop step : Option Int) : Err Slice :=
+def make (start stop step : Option Int) : Err Slice :=
   match H : step with
   | .none =>
     let stepNz : step ≠ some 0 := by rw [H]; trivial
@@ -130,8 +130,8 @@ def build (start stop step : Option Int) : Err Slice :=
     let stepNz : step ≠ some 0 := by rw [H]; simp_all
     .ok (Slice.mk start stop step stepNz)
 
-partial def build! (start stop step : Option Int) : Slice :=
-  get! (build start stop step)
+partial def make! (start stop step : Option Int) : Slice :=
+  get! (make start stop step)
 
 def all : Slice := default
 
@@ -266,19 +266,19 @@ def size (s : Slice) (dim : Nat) : Nat :=
   | .Backward, .none => (start + 1) / step.natAbs
   | .Backward, .some stop => (start - stop) / step.natAbs
 
-#guard (Slice.build! .none .none .none).size 10 == 10
-#guard (Slice.build! .none .none (.some (-1))).size 10 == 10
-#guard (Slice.build! .none .none (.some (-2))).size 10 == 5
-#guard (Slice.build! .none .none (.some 2)).size 10 == 5
-#guard (Slice.build! .none .none (.some 2)).size 5 == 3
-#guard (Slice.build! (.some 5) .none .none).size 10 == 5
-#guard (Slice.build! (.some 5) .none (.some 1)).size 10 == 5
-#guard (Slice.build! (.some 5) .none (.some 2)).size 10 == 3
-#guard (Slice.build! (.some 5) .none (.some 3)).size 10 == 2
-#guard (Slice.build! (.some 5) .none (.some (-1))).size 10 == 6
-#guard (Slice.build! (.some 5) .none (.some (-3))).size 10 == 2
-#guard (Slice.build! .none (.some 5) .none).size 10 == 5
-#guard (Slice.build! .none (.some 5) (.some (-1))).size 10 == 4
+#guard (make! .none .none .none).size 10 == 10
+#guard (make! .none .none (.some (-1))).size 10 == 10
+#guard (make! .none .none (.some (-2))).size 10 == 5
+#guard (make! .none .none (.some 2)).size 10 == 5
+#guard (make! .none .none (.some 2)).size 5 == 3
+#guard (make! (.some 5) .none .none).size 10 == 5
+#guard (make! (.some 5) .none (.some 1)).size 10 == 5
+#guard (make! (.some 5) .none (.some 2)).size 10 == 3
+#guard (make! (.some 5) .none (.some 3)).size 10 == 2
+#guard (make! (.some 5) .none (.some (-1))).size 10 == 6
+#guard (make! (.some 5) .none (.some (-3))).size 10 == 2
+#guard (make! .none (.some 5) .none).size 10 == 5
+#guard (make! .none (.some 5) (.some (-1))).size 10 == 4
 
 -- Reference implementation. When we do it for real we will use an iterator.
 private partial def sliceList! [Inhabited a] (s : Slice) (xs : List a) : List a :=
@@ -294,27 +294,27 @@ private partial def sliceList! [Inhabited a] (s : Slice) (xs : List a) : List a 
     loop (xs.get! i.toNat :: acc) (i + step)
   loop [] start
 
-#guard (Slice.build! .none .none .none).sliceList! [0, 1, 2, 3, 4] == [0, 1, 2, 3, 4]
-#guard (Slice.build! (.some 0) .none .none).sliceList! [0, 1, 2, 3, 4] == [0, 1, 2, 3, 4]
-#guard (Slice.build! (.some 0) (.some 5) .none).sliceList! [0, 1, 2, 3, 4] == [0, 1, 2, 3, 4]
-#guard (Slice.build! (.some 0) (.some 5) (.some 1)).sliceList! [0, 1, 2, 3, 4] == [0, 1, 2, 3, 4]
-#guard (Slice.build! (.some 3) (.some 5) (.some 1)).sliceList! [0, 1, 2, 3, 4] == [3, 4]
-#guard (Slice.build! (.some 10) (.some 5) (.some 1)).sliceList! [0, 1, 2, 3, 4] == []
-#guard (Slice.build! (.some (-10)) (.some 5) (.some 1)).sliceList! [0, 1, 2, 3, 4] == [0, 1, 2, 3, 4]
-#guard (Slice.build! (.some (-10)) (.some 5) (.some 100)).sliceList! [0, 1, 2, 3, 4] == [0]
-#guard (Slice.build! .none .none (.some (-1))).sliceList! [0, 1, 2, 3, 4] == [4, 3, 2, 1, 0]
-#guard (Slice.build! .none (.some 0) (.some (-1))).sliceList! [0, 1, 2, 3, 4] == [4, 3, 2, 1]
-#guard (Slice.build! .none (.some (-5)) (.some (-1))).sliceList! [0, 1, 2, 3, 4] == [4, 3, 2, 1]
-#guard (Slice.build! .none (.some (-6)) (.some (-1))).sliceList! [0, 1, 2, 3, 4] == [4, 3, 2, 1, 0]
-#guard (Slice.build! .none (.some (-600)) (.some (-1))).sliceList! [0, 1, 2, 3, 4] == [4, 3, 2, 1, 0]
-#guard (Slice.build! (.some 4) .none (.some (-1))).sliceList! [0, 1, 2, 3, 4] == [4, 3, 2, 1, 0]
-#guard (Slice.build! (.some 5) .none (.some (-1))).sliceList! [0, 1, 2, 3, 4] == [4, 3, 2, 1, 0]
-#guard (Slice.build! (.some 500) .none (.some (-1))).sliceList! [0, 1, 2, 3, 4] == [4, 3, 2, 1, 0]
-#guard (Slice.build! .none .none (.some 2)).sliceList! [0, 1, 2, 3, 4] == [0, 2, 4]
-#guard (Slice.build! (.some 1) .none (.some 2)).sliceList! [0, 1, 2, 3, 4] == [1, 3]
-#guard (Slice.build! .none .none (.some (-1))).sliceList! [0, 1, 2, 3, 4] == [4, 3, 2, 1, 0]
-#guard (Slice.build! .none .none (.some (-2))).sliceList! [0, 1, 2, 3, 4] == [4, 2, 0]
-#guard (Slice.build! .none .none (.some (-200))).sliceList! [0, 1, 2, 3, 4] == [4]
+#guard (make! .none .none .none).sliceList! [0, 1, 2, 3, 4] == [0, 1, 2, 3, 4]
+#guard (make! (.some 0) .none .none).sliceList! [0, 1, 2, 3, 4] == [0, 1, 2, 3, 4]
+#guard (make! (.some 0) (.some 5) .none).sliceList! [0, 1, 2, 3, 4] == [0, 1, 2, 3, 4]
+#guard (make! (.some 0) (.some 5) (.some 1)).sliceList! [0, 1, 2, 3, 4] == [0, 1, 2, 3, 4]
+#guard (make! (.some 3) (.some 5) (.some 1)).sliceList! [0, 1, 2, 3, 4] == [3, 4]
+#guard (make! (.some 10) (.some 5) (.some 1)).sliceList! [0, 1, 2, 3, 4] == []
+#guard (make! (.some (-10)) (.some 5) (.some 1)).sliceList! [0, 1, 2, 3, 4] == [0, 1, 2, 3, 4]
+#guard (make! (.some (-10)) (.some 5) (.some 100)).sliceList! [0, 1, 2, 3, 4] == [0]
+#guard (make! .none .none (.some (-1))).sliceList! [0, 1, 2, 3, 4] == [4, 3, 2, 1, 0]
+#guard (make! .none (.some 0) (.some (-1))).sliceList! [0, 1, 2, 3, 4] == [4, 3, 2, 1]
+#guard (make! .none (.some (-5)) (.some (-1))).sliceList! [0, 1, 2, 3, 4] == [4, 3, 2, 1]
+#guard (make! .none (.some (-6)) (.some (-1))).sliceList! [0, 1, 2, 3, 4] == [4, 3, 2, 1, 0]
+#guard (make! .none (.some (-600)) (.some (-1))).sliceList! [0, 1, 2, 3, 4] == [4, 3, 2, 1, 0]
+#guard (make! (.some 4) .none (.some (-1))).sliceList! [0, 1, 2, 3, 4] == [4, 3, 2, 1, 0]
+#guard (make! (.some 5) .none (.some (-1))).sliceList! [0, 1, 2, 3, 4] == [4, 3, 2, 1, 0]
+#guard (make! (.some 500) .none (.some (-1))).sliceList! [0, 1, 2, 3, 4] == [4, 3, 2, 1, 0]
+#guard (make! .none .none (.some 2)).sliceList! [0, 1, 2, 3, 4] == [0, 2, 4]
+#guard (make! (.some 1) .none (.some 2)).sliceList! [0, 1, 2, 3, 4] == [1, 3]
+#guard (make! .none .none (.some (-1))).sliceList! [0, 1, 2, 3, 4] == [4, 3, 2, 1, 0]
+#guard (make! .none .none (.some (-2))).sliceList! [0, 1, 2, 3, 4] == [4, 2, 0]
+#guard (make! .none .none (.some (-200))).sliceList! [0, 1, 2, 3, 4] == [4]
 
 /-
 Iteration over slices is finicky because
@@ -399,9 +399,9 @@ private def toList (iter : Iter) : List Nat := Id.run do
   return res.reverse
 
 #guard (Iter.make Slice.all 5).toList == [0, 1, 2, 3, 4]
-#guard (Iter.make (Slice.build! .none .none (.some 2)) 5).toList == [0, 2, 4]
-#guard (Iter.make (Slice.build! (.some 3) .none .none) 5).toList == [3, 4]
-#guard (Iter.make (Slice.build! .none .none (.some (-1))) 5).toList == [4, 3, 2, 1, 0]
+#guard (Iter.make (make! .none .none (.some 2)) 5).toList == [0, 2, 4]
+#guard (Iter.make (make! (.some 3) .none .none) 5).toList == [3, 4]
+#guard (Iter.make (make! .none .none (.some (-1))) 5).toList == [4, 3, 2, 1, 0]
 
 private def testBreak (iter : Iter) : List Nat := Id.run do
   let mut res := []
