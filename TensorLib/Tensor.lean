@@ -349,6 +349,9 @@ instance BV16Little : Element BV16 where
   toByteArray (x : BV16) : ByteArray := x.toByteArray .littleEndian
   fromByteArray arr startIndex := ByteArray.toBV16 arr startIndex .littleEndian
 
+#guard (arange BV16 10).size == 10
+#guard toList! BV16 (Tensor.Element.arange BV16 10) == [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+
 instance BV32Little : Element BV32 where
   dtype := Dtype.mk .uint32 .littleEndian
   itemsize := 4
@@ -363,8 +366,22 @@ instance BV64Little : Element BV64 where
   toByteArray (x : BV64) : ByteArray := x.toByteArray .littleEndian
   fromByteArray arr startIndex := ByteArray.toBV64 arr startIndex .littleEndian
 
-#guard (arange BV16 10).size == 10
-#guard toList! BV16 (Tensor.Element.arange BV16 10) == [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+instance Int64Little : Element Int64 where
+  dtype := Dtype.mk .int64 .littleEndian
+  itemsize := 8
+  ofNat := Int64.ofNat
+  toByteArray x : ByteArray := ByteOrder.bitVecToByteArray .littleEndian 64 x.toBitVec
+  fromByteArray arr startIndex := .ok (ByteOrder.bytesToInt .littleEndian (arr.extract startIndex (startIndex + 8))).toInt64
+
+#guard (Int64Little.toByteArray 7).toList == [7, 0, 0, 0, 0, 0, 0, 0]
+#guard (Int64Little.toByteArray (-2)).toList == [0xFE, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
+
+private def roundTrip64 (n : Int64) := Int64Little.fromByteArray (Int64Little.toByteArray n) 0
+
+#guard roundTrip64 (-2) == .ok (-2)
+#guard roundTrip64 0 == .ok 0
+#guard roundTrip64 2 == .ok 2
+#guard roundTrip64 0xFFFFFFFFFFFFFFFF == .ok 0xFFFFFFFFFFFFFFFF
 
 end Element
 

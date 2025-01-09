@@ -73,6 +73,7 @@ def isIntLike (dtype : Dtype) : Bool := dtype.isInt || dtype.isUint
 
 def int8 : Dtype := Dtype.mk Dtype.Name.int8 ByteOrder.littleEndian
 def uint8 : Dtype := Dtype.mk Dtype.Name.uint8 ByteOrder.littleEndian
+def int64 : Dtype := Dtype.mk Dtype.Name.int64 ByteOrder.littleEndian
 def uint64 : Dtype := Dtype.mk Dtype.Name.uint64 ByteOrder.littleEndian
 def float64 : Dtype := Dtype.mk Dtype.Name.float64 ByteOrder.littleEndian
 
