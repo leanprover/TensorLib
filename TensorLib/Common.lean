@@ -78,6 +78,30 @@ def bytesToInt (order : ByteOrder) (bytes : ByteArray) : Int := Id.run do
 #guard bytesToInt .bigEndian (ByteArray.mk #[0x80, 0]) == -32768
 #guard bytesToInt .littleEndian (ByteArray.mk #[0x80, 0]) == 0x80
 
+def bitVecToByteArray (order : ByteOrder) (n : Nat) (v : BitVec n) : ByteArray := Id.run do
+  let numBytes := natDivCeil n 8
+  let mut arr := ByteArray.mkEmpty numBytes
+  match order with
+  | .oneByte =>
+    let byte := (v &&& 0xFF).toNat.toUInt8
+    return arr.push byte
+  | .littleEndian =>
+    for i in [0 : numBytes] do
+      let byte := (v.ushiftRight (i * 8) &&& 0xFF).toNat.toUInt8
+      arr := arr.push byte
+    return arr
+  | .bigEndian =>
+    for i in [0 : numBytes] do
+      let byte := (v.ushiftRight ((numBytes - i - 1) * 8) &&& 0xFF).toNat.toUInt8
+      arr := arr.push byte
+    return arr
+
+#guard (bitVecToByteArray .bigEndian 16 0x0100).toList == [1, 0]
+#guard (bitVecToByteArray .littleEndian 16 0x0100).toList == [0, 1]
+#guard (bitVecToByteArray .bigEndian 20 0x01000).toList == [0, 16, 0]
+#guard (bitVecToByteArray .littleEndian 32 0x1).toList == [1, 0, 0, 0]
+#guard (bitVecToByteArray .bigEndian 32 0x1).toList == [0, 0, 0, 1]
+
 end ByteOrder
 
 /-!
@@ -521,6 +545,8 @@ def BV32.toByteArray (x : BV32) (ord : ByteOrder) : ByteArray :=
 abbrev BV64 := BitVec 64
 
 def BV64.ofNat (i : Nat) : BV64 := i.toUInt64.toBitVec
+
+def BV64.ofInt (i : Int) : BV64 := i.toInt64.toBitVec
 
 def BV64.toBytes (n : BV64) : BV8 × BV8 × BV8 × BV8 × BV8 × BV8 × BV8 × BV8 :=
   let n0 := (n >>> 0o00 &&& 0xFF).truncate 8
