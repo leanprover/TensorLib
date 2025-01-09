@@ -366,7 +366,7 @@ private def Ndarray.toByteArray! (arr : Ndarray) : ByteArray :=
   let a := pushString a "NUMPY"
   let a := pushList a [arr.header.major, arr.header.minor]
   let a := (a.push 0).push 0 -- index 8, 9. We will clobber this with the header size in a moment
-  if a.size != 10 then panic s!"Bad header size: {a.size}, should be 9" else
+  if a.size != 10 then impossible s!"Bad header size: {a.size}, should be 9" else
   let order := false -- We only support C order
   let a := pushStrings a [
     "{'descr': '",

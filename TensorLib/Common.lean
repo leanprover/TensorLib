@@ -10,6 +10,8 @@ namespace TensorLib
 --! The error monad for TensorLib
 abbrev Err := Except String
 
+def impossible {a : Type} [h : Inhabited a] (msg : String := "") := @panic a h s!"Invariant violation: {msg}"
+
 instance [BEq a] : BEq (Err a) where
   beq x y := match x, y with
   | .ok x, .ok y => x == y
@@ -17,7 +19,7 @@ instance [BEq a] : BEq (Err a) where
   | _, _ => false
 
 def get! [Inhabited a] (x : Err a) : a := match x with
-| .error msg => panic msg
+| .error msg => impossible msg
 | .ok x => x
 
 def dot [Add a][Mul a][Zero a] (x y : List a) : a := (x.zip y).foldl (fun acc (a, b) => acc + a * b) 0

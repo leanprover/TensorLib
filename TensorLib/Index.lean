@@ -44,17 +44,20 @@ deriving BEq, Repr
 
 abbrev NumpyBasic := List NumpyItem
 
--- Slices do not subsume nat indexing. Slices always return an array
--- with the same dimension as the input, while a nat index always reduces the
--- dimensions by one.
--- x
--- array([1, 2, 3, 4, 5, 6])
---
--- x[0], x[0:1:1]
--- (np.int64(1), array([1]))
---
--- x[0].shape, x[0:1:1].shape
--- ((), (1,))
+/-
+Slices do not subsume nat indexing. Slices always return an array
+with the same dimension as the input, while a nat index always reduces the
+dimensions by one.
+
+# x
+array([1, 2, 3, 4, 5, 6])
+
+# x[0], x[0:1:1]
+(np.int64(1), array([1]))
+
+# x[0].shape, x[0:1:1].shape
+((), (1,))
+-/
 inductive Item where
 | nat (n : Nat)
 | slice (slice : Slice.Iter)
@@ -185,7 +188,7 @@ private def nextWithCarry (basic : Basic) (carry : Bool) : List Nat × Option Ba
   | .slice sliceIter :: basic =>
     match sliceIter.next with
     -- We already reset the iterator once we return the max element
-    | .none => panic "Invariant violation"
+    | .none => impossible
     | .some (n, nextSliceIter) =>
       if nextSliceIter.hasNext
       then (n :: current basic, .slice nextSliceIter :: basic)
@@ -447,8 +450,8 @@ private def numpyBasicToList (dims : List Nat) (basic : NumpyBasic) : Option (Li
 #guard numpyBasicToList [2] [.int (-1)] == some [[1]]
 #guard numpyBasicToList [2] [.int (-3)] == none
 #guard numpyBasicToList [4] [.slice Slice.all] == some [[0], [1], [2], [3]]
-#guard numpyBasicToList [4] [.slice $ Slice.build! .none .none (.some 2)] == some [[0], [2]]
-#guard numpyBasicToList [4] [.slice $ Slice.build! (.some (-1)) .none (.some (-2))] == some [[3], [1]]
+#guard numpyBasicToList [4] [.slice $ Slice.make! .none .none (.some 2)] == some [[0], [2]]
+#guard numpyBasicToList [4] [.slice $ Slice.make! (.some (-1)) .none (.some (-2))] == some [[3], [1]]
 #guard numpyBasicToList [2, 2] [.int 5] == none
 #guard numpyBasicToList [2, 2] [.int 0] == some [[0, 0], [0, 1]]
 #guard numpyBasicToList [2, 2] [.int 0, .int 0] == some [[0, 0]]
@@ -457,8 +460,8 @@ private def numpyBasicToList (dims : List Nat) (basic : NumpyBasic) : Option (Li
 #guard numpyBasicToList [3, 3] [.slice Slice.all, .int 2] == some [[0, 2], [1, 2], [2, 2]]
 #guard numpyBasicToList [3, 3] [.int 2, .slice Slice.all] == some [[2, 0], [2, 1], [2, 2]]
 #guard numpyBasicToList [2, 2] [.slice Slice.all, .slice Slice.all] == some [[0, 0], [0, 1], [1, 0], [1, 1]]
-#guard numpyBasicToList [2, 2] [.slice (Slice.build! .none .none (.some (-1))), .slice Slice.all] == some [[1, 0], [1, 1], [0, 0], [0, 1]]
-#guard numpyBasicToList [4, 2] [.slice (Slice.build! .none .none (.some (-2))), .slice Slice.all] == some [[3, 0], [3, 1], [1, 0], [1, 1]]
+#guard numpyBasicToList [2, 2] [.slice (Slice.make! .none .none (.some (-1))), .slice Slice.all] == some [[1, 0], [1, 1], [0, 0], [0, 1]]
+#guard numpyBasicToList [4, 2] [.slice (Slice.make! .none .none (.some (-2))), .slice Slice.all] == some [[3, 0], [3, 1], [1, 0], [1, 1]]
 
 -- Commented for easier debugging. Remove some day
 -- #eval do

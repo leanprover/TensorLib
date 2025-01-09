@@ -447,6 +447,8 @@ def toTree (a : Type) [Repr a] [Element a] (x : Tensor) : Err (Format.Tree a) :=
   let xs <- Element.toList a x
   Format.toTree xs x.unitStrides
 
+def toTree! (a : Type) [Repr a] [Element a] (x : Tensor) : Format.Tree a := get! $ toTree a x
+
 def format (a : Type) [Repr a] [Element a] (x : Tensor) : Err Std.Format := do
   let t <- toTree a x
   let f <- Format.formatTree t x.shape
