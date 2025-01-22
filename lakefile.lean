@@ -12,7 +12,10 @@ lean_exe "tensorlib" where
   root := `Main
 
 require aesop from git
-  "https://github.com/leanprover-community/aesop" @ "master" -- 'master' rather than a tag is a workaround for segfault bug https://github.com/leanprover/lean4/issues/6518#issuecomment-2574607960
+  "https://github.com/leanprover-community/aesop" @ "v4.15.0"
+
+require plausible from git
+  "https://github.com/leanprover-community/plausible" @ "v4.15.0"
 
 require Cli from git
   "https://github.com/leanprover/lean4-cli.git" @ "v2.2.0-lv4.14.0-rc1"

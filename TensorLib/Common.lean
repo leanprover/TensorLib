@@ -5,7 +5,19 @@ Authors: Jean-Baptiste Tristan, Paul Govereau, Sean McLaughlin
 -/
 
 import Std.Tactic.BVDecide
+import Plausible
+open Plausible
+
 namespace TensorLib
+
+private def plausibleDefaultConfig : Plausible.Configuration := {}
+/-
+This suppresses messages from Plausible on the commandline when building, such as
+    info: ././././TensorLib/Common.lean:37:0: Unable to find a counter-example
+If you want to see the counterexample in the IDE, you need to remove the configuration argument,
+but remember to add it back once you've fixed the bug.
+-/
+def cfg : Plausible.Configuration := { plausibleDefaultConfig with quiet := true }
 
 --! The error monad for TensorLib
 abbrev Err := Except String
@@ -25,6 +37,29 @@ def get! [Inhabited a] (x : Err a) : a := match x with
 def dot [Add a][Mul a][Zero a] (x y : List a) : a := (x.zip y).foldl (fun acc (a, b) => acc + a * b) 0
 
 def natDivCeil (num denom : Nat) : Nat := (num + denom - 1) / denom
+
+section Test
+
+#eval Testable.check (cfg := cfg) (
+  ∀ (x y : Nat),
+  let c := natDivCeil x y
+  let f := x / y
+  c == f || c == (f + 1)
+)
+
+local instance : SampleableExt (Nat × Nat) :=
+  SampleableExt.mkSelfContained do
+    let x ← SampleableExt.interpSample Nat
+    let n <- SampleableExt.interpSample Nat
+    return (x * n, x)
+
+#eval Testable.check (cfg := cfg) (
+  ∀ (xy : Nat × Nat),
+  let (x, y) := xy
+  x % y = 0 → x / y = natDivCeil x y
+)
+
+end Test
 
 def natProd (shape : List Nat) : Nat := shape.foldl (fun x y => x * y) 1
 
