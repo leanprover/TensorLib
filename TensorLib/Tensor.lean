@@ -269,7 +269,7 @@ class Element (a : Type) where
 namespace Element
 
 -- An array-scalar is a box around a scalar with nil shape that can be used for array operations like broadcasting
-def arrayScalar [w : Element a] (x : a) : Tensor :=
+def arrayScalar (a : Type) [w : Element a] (x : a) : Tensor :=
   { dtype := w.dtype, shape := Shape.empty, data := w.toByteArray x}
 
 --! An array of the numbers from 0 to n-1
@@ -293,7 +293,7 @@ def setPosition [typ : Element a] (x : Tensor) (n : Nat) (v : a): Err Tensor :=
   let posn := n * itemsize
   .ok { x with data := bytes.copySlice 0 x.data posn itemsize true }
 
-def ofList (typ : Element a) (xs : List a) : Tensor := Id.run do
+def ofList (a : Type) [typ : Element a] (xs : List a) : Tensor := Id.run do
   let arr := Tensor.zeros typ.dtype (Shape.mk [xs.length])
   let mut data := arr.data
   let mut posn := 0
@@ -504,7 +504,7 @@ private def toNpy (arr : Tensor) : Npy.Ndarray :=
 
 section Test
 
-#guard str BV8 (Element.arrayScalar (5 : BV8)) == "array(0x05#8)"
+#guard str BV8 (Element.arrayScalar BV8 5) == "array(0x05#8)"
 #guard str BV8 (Element.arange BV8 10) == "array([0x00#8, 0x01#8, 0x02#8, 0x03#8, 0x04#8, 0x05#8, 0x06#8, 0x07#8, 0x08#8, 0x09#8])"
 
 private def arr0 := Element.arange BV8 8
@@ -520,8 +520,8 @@ private def arr1 := Element.arange BV8 12
 #guard (ones (Dtype.float64) $ Shape.mk [2, 2]).nbytes == 2 * 2 * 8
 #guard (ones (Dtype.float64) $ Shape.mk [2, 2]).data.toList.count 1 == 2 * 2
 
-#guard get! ((Element.ofList Element.BV8Native [1, 2, 3]).toTree BV8) == Format.Tree.root [1, 2, 3]
-#guard get! (((Element.ofList Element.BV8Native [0, 1, 2, 3, 4, 5]).reshape! (Shape.mk [2, 3])).toTree BV8) == .node [.root [0, 1, 2], .root [3, 4, 5]]
+#guard get! ((Element.ofList BV8 [1, 2, 3]).toTree BV8) == Format.Tree.root [1, 2, 3]
+#guard get! (((Element.ofList BV8 [0, 1, 2, 3, 4, 5]).reshape! (Shape.mk [2, 3])).toTree BV8) == .node [.root [0, 1, 2], .root [3, 4, 5]]
 
 end Test
 

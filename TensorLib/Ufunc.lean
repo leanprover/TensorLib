@@ -56,7 +56,7 @@ private def sum0 (a : Type) [Add a] [Zero a] [Element a] (arr : Tensor) : Err Te
   for index in iter do
     let n : a <- Element.getDimIndex arr index
     acc := Add.add acc n
-  return Element.arrayScalar acc
+  return Element.arrayScalar a acc
 
 -- Sum with a single axis.
 private def sum1 (a : Type) [Add a] [Zero a] [Element a] (arr : Tensor) (axis : Nat) : Err Tensor := do
@@ -147,7 +147,7 @@ private def hasTree1 (a : Type) [Repr a] [BEq a] [Element a] (arr : Tensor) (xs 
 #guard
   let typ := BV8
   let x := Element.arange typ 10
-  let y := Element.arrayScalar (7 : typ)
+  let y := Element.arrayScalar typ 7
   let arr := get! $ add typ x y
   hasTree1 typ arr [7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
 

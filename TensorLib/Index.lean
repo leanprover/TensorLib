@@ -388,9 +388,9 @@ def apply (indexTensors : List Tensor) (arr : Tensor) : Err Tensor := do
 24 25 26
 -/
 #guard
-  let ind0 := (Tensor.Element.ofList Tensor.Element.Int8Native [1, 2, 0, 0]).reshape! (Shape.mk [2, 2])
-  let ind1 := (Tensor.Element.ofList Tensor.Element.Int8Native [2, -2, 0, 1]).reshape! (Shape.mk [2, 2])
-  let ind2 := (Tensor.Element.ofList Tensor.Element.Int8Native [1, 1, -1, -1]).reshape! (Shape.mk [2, 2])
+  let ind0 := (Tensor.Element.ofList Int8 [1, 2, 0, 0]).reshape! (Shape.mk [2, 2])
+  let ind1 := (Tensor.Element.ofList Int8 [2, -2, 0, 1]).reshape! (Shape.mk [2, 2])
+  let ind2 := (Tensor.Element.ofList Int8 [1, 1, -1, -1]).reshape! (Shape.mk [2, 2])
   let typ := BV16
   let arr := (Tensor.Element.arange typ 27).reshape! (Shape.mk [3, 3, 3])
   let res := get! $ apply [ind0, ind1, ind2] arr
@@ -400,31 +400,33 @@ def apply (indexTensors : List Tensor) (arr : Tensor) : Err Tensor := do
 end Advanced
 
 section Test
+open Tensor
+open Tensor.Format.Tree
 
 #guard
   let tp := BV8
-  let tensor := Tensor.Element.arange tp 10
+  let tensor := Element.arange tp 10
   let tensor := tensor.reshape! $ Shape.mk [2, 5]
   let index := [.int 1]
   let res := get! $ applyWithCopy index tensor
   let tree := get! $ res.toTree tp
-  let tree' := Tensor.Format.Tree.root [5, 6, 7, 8, 9]
+  let tree' := .root [5, 6, 7, 8, 9]
   tree == tree'
 
 #guard
   let tp := BV8
-  let tensor := Tensor.Element.arange tp 10
+  let tensor := Element.arange tp 10
   let tensor := tensor.reshape! $ Shape.mk [2, 5]
   let index := [.int 1]
   -- Bug in #guard keeps me from using `let (arr, copied) := ...` here
   let ac := get! $ apply index tensor
   let arr := ac.fst
   let copied := ac.snd
-  let tree' := Tensor.Format.Tree.root [5, 6, 7, 8, 9]
+  let tree' := .root [5, 6, 7, 8, 9]
   !copied && (get! $ arr.toTree tp) == tree'
 
 #guard let tp := BV8
-      let tensor := Tensor.Element.arange tp 20
+      let tensor := Element.arange tp 20
       let tensor := tensor.reshape! $ Shape.mk [2, 2, 5]
       let index := [.int 1, .int 1, .int 4]
       -- Bug in #guard keeps me from using `let (arr, copied) := ...` here
@@ -432,7 +434,7 @@ section Test
       let arr := ac.fst
       let copied := ac.snd
       let tree := get! $ arr.toTree tp
-      let tree' := Tensor.Format.Tree.root [19]
+      let tree' := .root [19]
       !copied && tree == tree'
 
 -- Testing
