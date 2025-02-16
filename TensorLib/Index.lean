@@ -144,21 +144,7 @@ deriving Inhabited, Repr
 
 namespace BasicIter
 
--- An iterator is compatible with a shape if all of the shape's dimensions are
--- larger than the constant indices and equal to the iterator indices.
-private def compatibleWith (iter : BasicIter) (shape : List Nat) : Bool :=
-  let rec loop := fun
-  | [], [] => true
-  | .nat n :: basic, dim :: shape => n < dim && loop basic shape
-  | .slice iter :: basic, dim :: shape => dim <= iter.dim && loop basic shape
-  | _, _ => false
-  loop iter.basic shape
-
-def make (shape : Shape) (basic : Basic) : Err BasicIter :=
-  let iter := BasicIter.mk basic.reverse false
-  if ! compatibleWith iter shape.val.reverse
-  then .error s!"shape/index mismatch: {shape.val} : {basic.repr 100}"
-  else .ok iter
+def make (basic : Basic) : BasicIter :=  BasicIter.mk basic.reverse false
 
 def hasNext (iter : BasicIter) : Bool := !iter.done
 
@@ -228,9 +214,8 @@ private def toList (iter : BasicIter) : List (List Nat) := Id.run do
   return res.reverse
 
 #guard
-  let shape := Shape.mk [3, 3]
   let slice := Slice.Iter.make Slice.all 3
-  (get! $ BasicIter.make shape [.slice slice, .slice slice]).toList ==
+  (BasicIter.make [.slice slice, .slice slice]).toList ==
     [[0, 0], [0, 1], [0, 2],
      [1, 0], [1, 1], [1, 2],
      [2, 0], [2, 1], [2, 2]]
@@ -243,9 +228,8 @@ private def testBreak (iter : BasicIter) : List (List Nat) := Id.run do
   return res.reverse
 
 #guard
-  let shape := Shape.mk [5, 5]
   let slice := Slice.Iter.make Slice.all 5
-  testBreak (get! $ BasicIter.make shape [.slice slice, .slice slice]) == [[0, 0]]
+  testBreak (BasicIter.make [.slice slice, .slice slice]) == [[0, 0]]
 
 private def testReturn (iter : BasicIter) : List (List Nat) := Id.run do
   let mut res := []
@@ -257,17 +241,16 @@ private def testReturn (iter : BasicIter) : List (List Nat) := Id.run do
   return res.reverse
 
 #guard
-  let shape := Shape.mk [5, 5]
   let slice := Slice.Iter.make Slice.all 5
-  testReturn (get! $ BasicIter.make shape [.slice slice, .slice slice]) == [[0, 0], [0, 1], [0, 2]]
+  testReturn (BasicIter.make [.slice slice, .slice slice]) == [[0, 0], [0, 1], [0, 2]]
 
 end BasicIter
 
-def applyWithCopy (index : NumpyBasic) (arr : Tensor) : Err Tensor := do
+private def applyWithCopy (index : NumpyBasic) (arr : Tensor) : Err Tensor := do
   let itemsize := arr.itemsize
   let oldShape := arr.shape
   let (basic, newShape) <- toBasic index oldShape
-  let iter <- BasicIter.make oldShape basic
+  let iter := BasicIter.make basic
   let mut data := ByteArray.mkEmpty (iter.size * itemsize)
   for dimIndex in iter do
     let posn := arr.dimIndexToPosition dimIndex
@@ -441,7 +424,7 @@ open Tensor.Format.Tree
 private def numpyBasicToList (dims : List Nat) (basic : NumpyBasic) : Option (List (List Nat)) := do
   let shape := Shape.mk dims
   let (basic, _) <- (toBasic basic shape).toOption
-  let iter <- (BasicIter.make shape basic).toOption
+  let iter := BasicIter.make basic
   iter.toList
 
 #guard numpyBasicToList [] [] == some [[]]
