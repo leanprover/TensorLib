@@ -239,6 +239,7 @@ def copyAndReshape! (arr : Tensor) (shape : Shape) : Tensor :=
   get! (copyAndReshape arr shape)
 
 def reshape (arr : Tensor) (shape : Shape) : Err Tensor :=
+  if arr.shape == shape then .ok arr else
   if arr.shape.count != shape.count then .error "Incompatible shapes" else
   if arr.isTriviallyReshapable
   then .ok { arr with shape, unitStrides := shape.unitStrides }
