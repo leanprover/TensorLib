@@ -297,6 +297,38 @@ def apply (index : NumpyBasic) (arr : Tensor) : Err (Tensor × Bool) := do
     return (res, false)
 
 /-
+`arr[index] = v`
+
+Since the dtypes need to be equal, for now, Element here is awkward. All we need it the byte size, which is in the Tensor
+Refactoring would be good here.
+
+Note that v is broadcast to arr[index].shape, but arr[index].shape is not broadcast to v, which wouldn't make sense.
+E.g.
+
+# x = np.arange(6).reshape(2, 3)
+# x[1,:] = np.array([5,6,7])
+
+is ok but
+
+# x[1,:] = np.array([[1,2,3], [4,5,6]])
+
+wouldn't make any sense, even though the shapes (1, 3) and (2, 3) are broadcastable.
+-/
+def assign (a : Type) [typ : Tensor.Element a] (arr : Tensor) (index : NumpyBasic) (v : Tensor) : Err Tensor := do
+  if arr.dtype != v.dtype || typ.dtype != arr.dtype then .error "Type mismatch" else
+  let (basic, shape) <- toBasic index arr.shape
+  let v <- v.broadcastTo shape
+  let aIter := BasicIter.make basic
+  let mut vIter := DimsIter.make v.shape
+  let mut res := arr
+  for aIndex in aIter do
+    let (vIndex, vIter') := vIter.next
+    vIter := vIter'
+    let vVal <- typ.getDimIndex v vIndex
+    res <- Tensor.Element.setDimIndex res aIndex vVal
+  return res
+
+/-
 For advanced indexing, the all-multidimensional-array case is relatively easy;
 broadcast all arguments to the same shape, then select the elements of the original
 array one by one. For example
@@ -419,6 +451,70 @@ open Tensor.Format.Tree
       let tree := get! $ arr.toTree tp
       let tree' := .root [19]
       !copied && tree == tree'
+
+#guard let tp := BV8
+      let tensor1 := (Element.arange tp 20).reshape! (Shape.mk [2, 2, 5])
+      let index := [.int 1, .int 1, .int 4]
+      let tensor2 := Element.arrayScalar tp 255
+      let res := get! $ assign tp tensor1 index tensor2
+      let tree := get! $ res.toTree tp
+      let tree' := node [
+        node [ root [0, 1, 2, 3, 4], root [5, 6, 7, 8, 9] ],
+        node [ root [10, 11, 12, 13, 14], root [15, 16, 17, 18, 255] ],
+      ]
+      tree == tree'
+
+#guard let tp := BV8
+      let tensor1 := (Element.arange tp 20).reshape! (Shape.mk [2, 2, 5])
+      let index := [.int 1, .int 1, .newaxis]
+      let tensor2 := Element.ofList tp [50, 60, 70, 80, 90]
+      let res := get! $ assign tp tensor1 index tensor2
+      let tree := get! $ res.toTree tp
+      let tree' := node [
+        node [ root [0, 1, 2, 3, 4], root [5, 6, 7, 8, 9] ],
+        node [ root [10, 11, 12, 13, 14], root [50, 60, 70, 80, 90] ],
+      ]
+      tree == tree'
+
+#guard let tp := BV8
+      let tensor1 := (Element.arange tp 20).reshape! (Shape.mk [2, 2, 5])
+      let index := [.int 1, .int 1, .slice (Slice.ofStartStop 1 4)]
+      let tensor2 := Element.ofList tp [50, 60, 70]
+      let res := get! $ assign tp tensor1 index tensor2
+      let tree := get! $ res.toTree tp
+      let tree' := node [
+        node [ root [0, 1, 2, 3, 4], root [5, 6, 7, 8, 9] ],
+        node [ root [10, 11, 12, 13, 14], root [15, 50, 60, 70, 19] ],
+      ]
+      tree == tree'
+
+#guard let tp := BV8
+      let tensor1 := (Element.arange tp 20).reshape! (Shape.mk [4, 5])
+      let index := [.slice (Slice.ofStartStop 1 3), .slice (Slice.ofStartStop 1 4)]
+      let tensor2 := (Element.ofList tp [40, 50, 60, 70, 80, 90]).reshape! (Shape.mk [2, 3])
+      let res := get! $ assign tp tensor1 index tensor2
+      let tree := get! $ res.toTree tp
+      let tree' := node [
+          root [0, 1, 2, 3, 4],
+          root [5, 40, 50, 60, 9],
+          root [10, 70, 80, 90, 14],
+          root [15, 16, 17, 18, 19]
+      ]
+      tree == tree'
+
+#guard let tp := BV8
+      let tensor1 := (Element.arange tp 20).reshape! (Shape.mk [4, 5])
+      let index := [NumpyItem.slice (Slice.ofStartStop 1 3), .slice (Slice.ofStartStop 1 4)]
+      let tensor2 := Element.ofList tp [40, 50, 60] -- tensor2 should be broadcast to (2, 3)
+      let res := get! $ assign tp tensor1 index tensor2
+      let tree := get! $ res.toTree tp
+      let tree' := node [
+          root [0, 1, 2, 3, 4],
+          root [5, 40, 50, 60, 9],
+          root [10, 40, 50, 60, 14],
+          root [15, 16, 17, 18, 19]
+      ]
+      tree == tree'
 
 -- Testing
 private def numpyBasicToList (dims : List Nat) (basic : NumpyBasic) : Option (List (List Nat)) := do
