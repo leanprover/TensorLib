@@ -303,6 +303,14 @@ def broadcastTo (arr : Tensor) (shape : Shape) : Err Tensor :=
     let strides <- broadcastStrides (arr.shape.val.zip arr.strides) shape
     .ok $ Tensor.mk arr.dtype shape arr.data arr.startIndex strides
 
+def broadcast (arr1 : Tensor) (arr2 : Tensor) : Err (Tensor × Tensor) :=
+  match Broadcast.broadcast { left := arr1.shape, right := arr2.shape } with
+  | none => .error "Can't broadcast"
+  | some shape => do
+  let arr1 <- arr1.broadcastTo shape
+  let arr2 <- arr2.broadcastTo shape
+  return (arr1, arr2)
+
 class Element (a : Type) where
   dtype : Dtype
   itemsize : Nat

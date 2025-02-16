@@ -240,6 +240,8 @@ instance : ToString Shape where
 
 def empty : Shape := Shape.mk []
 
+def append (shape : Shape) (dims : List Nat) : Shape := Shape.mk (shape.val ++ dims)
+
 --! The number of elements in a tensor. All that's needed is the shape for this calculation.
 -- TODO: Put this in the struct?
 def count (shape : Shape) : Nat := natProd shape.val
