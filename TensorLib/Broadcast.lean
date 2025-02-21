@@ -85,7 +85,16 @@ private def matchPairs (b : Broadcast) : Option Shape :=
   let dims := (b.left.val.zip b.right.val).mapM f
   dims.map Shape.mk
 
---! Returns the shape resulting from broadcast the arguments
+/-
+Returns the shape resulting from broadcast the arguments.
+
+Sometimes you want to fix one side of the broadcast, and only allow the other to extend/expand.
+An example of this is `arr.broadcastTo (2, 3, 4)` where we really want the array to have the
+shape `(2,3,4)`, not some compatible shape like `(2, 2, 3, 4)` if, say, `arr.shape = (2, 1, 1, 1)`.
+We don't need a separate function for this because you can just compare the fixed side to the
+solution and ensure they are the same. They will be equal iff the broadcasting didn't impact the
+fixed side.
+-/
 def broadcast (b : Broadcast) : Option Shape := matchPairs (oneExtendPrefix b)
 
 --! Whether broadcasting is possible
@@ -124,3 +133,4 @@ def broadcastList (shapes : List Shape) : Option Shape := Id.run do
  broadcastList [x1, x2, x3] == .some x1
 
 end Broadcast
+end TensorLib

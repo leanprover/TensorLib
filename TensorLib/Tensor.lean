@@ -5,6 +5,7 @@ Authors: Jean-Baptiste Tristan, Paul Govereau, Sean McLaughlin
 -/
 
 import Batteries.Data.List -- for `toChunks`
+import TensorLib.Broadcast
 import TensorLib.Common
 import TensorLib.Dtype
 import TensorLib.Npy
@@ -260,6 +261,48 @@ def transpose (arr : Tensor) : Tensor :=
     let arr := arr.copy
     { arr with shape, unitStrides := shape.unitStrides }
 
+-- The result shape is always equal to `toShape` so we don't need to remember it
+private def broadcastStrides (fromShapeAndStrides : List (Nat × Int)) (toShape : Shape) : Err Strides :=
+  let rec loop (fromShapeAndStrides : List (Nat × Int)) (toShape : List Nat) : Err Strides :=
+    match fromShapeAndStrides, toShape with
+    | [], [] => .ok []
+    | (xDim, xStride) :: xs, yDim :: ys =>
+      if xDim == yDim then do
+        let rest <- loop xs ys
+        return xStride :: rest
+      else if xDim == 1 then do
+        let rest <- loop xs ys
+        return 0 :: rest
+      else .error "Can't broadcast dimension"
+    | [], _ :: ys => do
+      let rest <- loop [] ys
+      return 0 :: rest
+    | _ :: _, [] => .error "Can't broadcast dimension"
+  (loop fromShapeAndStrides.reverse toShape.val.reverse).map fun x => x.reverse
+
+#guard broadcastStrides [] (Shape.mk []) == .ok []
+#guard broadcastStrides [(5, 8)] (Shape.mk [5]) == .ok [8]
+#guard broadcastStrides [(5, 8)] (Shape.mk [10, 5]) == .ok [0, 8]
+#guard broadcastStrides [(5, 8)] (Shape.mk [15, 10, 5]) == .ok [0, 0, 8]
+#guard !(broadcastStrides [(1, 0)] (Shape.mk [])).isOk
+#guard !(broadcastStrides [(1, 0), (2, 2), (3, 8)] (Shape.mk [2, 3])).isOk
+#guard !(broadcastStrides [(1, 0)] (Shape.mk [])).isOk
+#guard !(broadcastStrides [(2, 0), (2, 2), (3, 8)] (Shape.mk [1, 2, 3])).isOk
+
+/-
+Theorems to prove:
+* arr.broadcastTo arr.shape == arr
+* (arr.broadcastTo s1).broadcastTo s2 == arr.broadcastTo s2
+* ...
+-/
+def broadcastTo (arr : Tensor) (shape : Shape) : Err Tensor :=
+  match Broadcast.broadcast { left := arr.shape, right := shape } with
+  | none => .error s!"Can't broadcast {arr.shape} to {shape}"
+  | some shape' =>
+    if shape != shape' then .error s!"Can't broadcast {arr.shape} to {shape}" else do
+    let strides <- broadcastStrides (arr.shape.val.zip arr.strides) shape
+    .ok $ Tensor.mk arr.dtype shape arr.data arr.startIndex strides
+
 class Element (a : Type) where
   dtype : Dtype
   itemsize : Nat
@@ -444,9 +487,11 @@ private def formatTree [Repr a] (t : Tree a) (shape : Shape) : Err Std.Format :=
 
 end Format
 
-def toTree (a : Type) [Repr a] [Element a] (x : Tensor) : Err (Format.Tree a) := do
-  let xs <- Element.toList a x
-  Format.toTree xs x.unitStrides
+def toTree (a : Type) [Repr a] [Element a] (arr : Tensor) : Err (Format.Tree a) := do
+  let xs <- Element.toList a arr
+  -- Now that we have the elements in a list, we don't care about the strides `arr` which
+  -- could have been complex (e.g. negative). Now we just want standard unit strides over the list
+  Format.toTree xs arr.shape.unitStrides
 
 def toTree! (a : Type) [Repr a] [Element a] (x : Tensor) : Format.Tree a := get! $ toTree a x
 
@@ -504,6 +549,7 @@ private def toNpy (arr : Tensor) : Npy.Ndarray :=
   { header, data, startIndex }
 
 section Test
+open Tensor.Format.Tree
 
 #guard str BV8 (Element.arrayScalar BV8 5) == "array(0x05#8)"
 #guard str BV8 (Element.arange BV8 10) == "array([0x00#8, 0x01#8, 0x02#8, 0x03#8, 0x04#8, 0x05#8, 0x06#8, 0x07#8, 0x08#8, 0x09#8])"
@@ -523,6 +569,25 @@ private def arr1 := Element.arange BV8 12
 
 #guard get! ((Element.ofList BV8 [1, 2, 3]).toTree BV8) == Format.Tree.root [1, 2, 3]
 #guard get! (((Element.ofList BV8 [0, 1, 2, 3, 4, 5]).reshape! (Shape.mk [2, 3])).toTree BV8) == .node [.root [0, 1, 2], .root [3, 4, 5]]
+
+#guard let tp := BV8
+      let t1 := (Element.arange tp 6).reshape! (Shape.mk [2, 3])
+      let t2 := get! $ t1.broadcastTo (Shape.mk [2, 2, 3])
+      let tree := get! $ t2.toTree tp
+      let n1 := node [ root [0, 1, 2], root [3, 4, 5] ]
+      let tree' := node [ n1, n1 ]
+      tree == tree'
+
+#guard let tp := BV8
+      let t1 := (Element.arange tp 8).reshape! (Shape.mk [2, 1, 1, 4])
+      let t2 := get! $ t1.broadcastTo (Shape.mk [2, 3, 3, 4])
+      let tree := get! $ t2.toTree tp
+      let r1 := root [0, 1, 2, 3]
+      let r2 := root [4, 5, 6, 7]
+      let n1 := node [ r1, r1, r1 ]
+      let n2 := node [ r2, r2, r2 ]
+      let tree' := node [ node [ n1, n1, n1 ], node [n2, n2, n2] ]
+      tree == tree'
 
 end Test
 
