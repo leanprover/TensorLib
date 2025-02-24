@@ -14,10 +14,9 @@ open TensorLib
 def format (p : Parsed) : IO UInt32 := do
   let shape : Shape := Shape.mk (p.variableArgsAs! Nat).toList
   IO.println s!"Got shape {shape}"
-  let range := Tensor.Element.arange BV16 shape.count
+  let range := Tensor.arange! Dtype.uint16 shape.count
   let v := range.reshape! shape
-  let s := v.format BV16
-  IO.println s
+  IO.println v.toNatTree!.format!
   return 0
 
 def formatCmd := `[Cli|
