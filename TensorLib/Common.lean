@@ -89,6 +89,27 @@ def isMultiByte (x : ByteOrder) : Bool := match x with
 | .oneByte => false
 | .littleEndian | .bigEndian => true
 
+def bytesToNat (order : ByteOrder) (bytes : ByteArray) : Nat := Id.run do
+  let mut n : Nat := 0
+  let nbytes := bytes.size
+  for i in [0:nbytes] do
+    let v : UInt8 := bytes.get! i
+    let p := match order with
+    | .oneByte => 0 -- nbytes = 1
+    | .littleEndian => i
+    | .bigEndian => nbytes - 1 - i
+    n := n + Pow.pow 2 (8 * p) * v.toNat
+  return n
+
+#guard bytesToNat .littleEndian (ByteArray.mk #[1, 1]) == 257
+#guard bytesToNat .bigEndian (ByteArray.mk #[1, 1]) == 257
+#guard bytesToNat .littleEndian (ByteArray.mk #[0, 1]) == 256
+#guard bytesToNat .bigEndian (ByteArray.mk #[0, 1]) == 1
+#guard bytesToNat .littleEndian (ByteArray.mk #[0xFF, 0xFF]) == 65535
+#guard bytesToNat .bigEndian (ByteArray.mk #[0xFF, 0xFF]) == 65535
+#guard bytesToNat .bigEndian (ByteArray.mk #[0x80, 0]) == 32768
+#guard bytesToNat .littleEndian (ByteArray.mk #[0x80, 0]) == 0x80
+
 def bytesToInt (order : ByteOrder) (bytes : ByteArray) : Int := Id.run do
   let mut n : Nat := 0
   let nbytes := bytes.size
