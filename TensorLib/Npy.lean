@@ -48,11 +48,11 @@ deriving BEq, Repr, Inhabited
 
 namespace ByteOrder
 
-def toByteOrder (x : ByteOrder) (default : TensorLib.ByteOrder): TensorLib.ByteOrder := match x with
-| .native => default
-| .littleEndian => .littleEndian
-| .bigEndian => .bigEndian
-| .notApplicable => .oneByte
+def toByteOrder (x : ByteOrder) : Option TensorLib.ByteOrder := match x with
+| .native => none
+| .littleEndian => some .littleEndian
+| .bigEndian => some .bigEndian
+| .notApplicable => some .oneByte
 
 def toChar (x : ByteOrder) := match x with
 | native => '='
@@ -150,7 +150,15 @@ structure Ndarray where
   startIndex : Nat -- First byte of non-header data
   deriving Repr, Inhabited
 
-def Ndarray.nbytes (x : Ndarray) : Nat := x.header.descr.itemsize * x.header.shape.count
+namespace Ndarray
+
+def nbytes (x : Ndarray) : Nat := x.header.descr.itemsize * x.header.shape.count
+
+def dtype (arr : Ndarray) : Dtype := arr.header.descr
+
+def order (arr : Ndarray) : ByteOrder := arr.dtype.order
+
+end Ndarray
 
 section Parse
 
