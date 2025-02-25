@@ -77,6 +77,7 @@ structure Tensor where
   startIndex : Nat := 0 -- Pointer to the first byte of ndarray data. This is implicit in the `data` pointer in numpy.
   unitStrides : Strides := shape.unitStrides
   deriving Repr, Inhabited
+
 namespace Tensor
 
 /-!
@@ -246,7 +247,7 @@ def reshape (arr : Tensor) (shape : Shape) : Err Tensor :=
   then .ok { arr with shape, unitStrides := shape.unitStrides }
   else copyAndReshape arr shape
 
-def reshape! (arr : Tensor) (shape : Shape) : Tensor := get! $ reshape arr shape
+def reshape! (t : Tensor) (s : Shape) : Tensor := get! $ t.reshape s
 
 /-
 NumPy allows you to transpose flexibly on the axes, e.g. allowing arbitrary
@@ -311,131 +312,120 @@ def broadcast (arr1 : Tensor) (arr2 : Tensor) : Err (Tensor × Tensor) :=
   let arr2 <- arr2.broadcastTo shape
   return (arr1, arr2)
 
-class Element (a : Type) where
-  dtype : Dtype
-  itemsize : Nat
-  ofNat : Nat -> a
-  toByteArray (x : a) : ByteArray
-  fromByteArray (arr : ByteArray) (startIndex : Nat) : Err a
+def arrayScalar (dtype : Dtype) (arr : ByteArray) : Err Tensor :=
+  if dtype.itemsize != arr.size then .error "data size mismatch" else
+  .ok { dtype := dtype, shape := Shape.empty, data := arr }
 
-namespace Element
+def arrayScalarNat (dtype : Dtype) (n : Nat) : Err Tensor := do
+  let arr <- dtype.byteArrayOfNat n
+  arrayScalar dtype arr
 
--- An array-scalar is a box around a scalar with nil shape that can be used for array operations like broadcasting
-def arrayScalar (a : Type) [w : Element a] (x : a) : Tensor :=
-  { dtype := w.dtype, shape := Shape.empty, data := w.toByteArray x}
+def arrayScalarNat! (dtype : Dtype) (n : Nat) : Tensor := get! $ arrayScalarNat dtype n
 
---! An array of the numbers from 0 to n-1
---! https://numpy.org/doc/2.1/reference/generated/numpy.arange.html
-def arange (a : Type) [w : Element a] (n : Nat) : Tensor := Id.run do
-  let mut data := ByteArray.mkEmpty (n * w.itemsize)
+def arange (dtype : Dtype) (n : Nat) : Err Tensor := do
+  let size := dtype.itemsize
+  let mut data := ByteArray.mkEmpty (n * size)
   for i in [0:n] do
-    let bytes := w.toByteArray (w.ofNat i)
-    data := ByteArray.copySlice bytes 0 data (i * w.itemsize) w.itemsize
-  { dtype := w.dtype, shape := Shape.mk [n], data }
+    let bytes <- dtype.byteArrayOfNat i
+    data := ByteArray.copySlice bytes 0 data (i * size) size
+  return { dtype := dtype, shape := Shape.mk [n], data }
+
+def arange! (dtype : Dtype) (n : Nat) : Tensor := get! $ arange dtype n
 
 -- This is a blind index into the array, disregarding the shape.
-def getPosition [typ : Element a] (x : Tensor) (position : Nat) : Err a :=
-  if typ.itemsize != x.itemsize then .error "byte size mismatch" else -- TODO: Lift this check out so we only do it once
-  typ.fromByteArray x.data (position * typ.itemsize)
+def getPosition (arr : Tensor) (position : Nat) : ByteArray :=
+  arr.data.copySlice (position * arr.itemsize) (ByteArray.mkEmpty arr.itemsize) 0 arr.itemsize
 
-def setPosition [typ : Element a] (x : Tensor) (n : Nat) (v : a): Err Tensor :=
-  let itemsize := typ.itemsize
-  if itemsize != x.itemsize then .error "byte size mismatch" else -- TODO: Lift this check out so we only do it once
-  let bytes := typ.toByteArray v
-  let posn := n * itemsize
-  .ok { x with data := bytes.copySlice 0 x.data posn itemsize true }
+#guard
+  let tp :=  Dtype.uint32
+  let arr := arange! tp 4
+  let v := getPosition arr 3
+  v.toList == [3, 0, 0, 0]
 
-def ofList (a : Type) [typ : Element a] (xs : List a) : Tensor := Id.run do
-  let arr := Tensor.zeros typ.dtype (Shape.mk [xs.length])
+-- This is a blind index into the array, disregarding the shape.
+def setPosition (arr : Tensor) (n : Nat) (v : ByteArray): Tensor :=
+  let size := arr.itemsize
+  let posn := n * size
+  { arr with data := v.copySlice 0 arr.data posn size }
+
+#guard
+  let tp :=  Dtype.uint8
+  let arr := arange! tp 4
+  let arr := setPosition arr 0 (tp.byteArrayOfNat! 7)
+  arr.data.data == #[7, 1, 2, 3]
+
+/-
+We now define some constructors for Tensors that are mostly useful
+for testing. Instead of requiring the `dtype` argument, it may be
+better to use a class, e.g.
+
+    class DtypeOf a where
+      dtype : Dtype
+
+and let `ofList` infer the dtype. The reason we're not going with
+this now is that there is no obvious canonical candidate for the
+dtype. E.g. for Nat, we could reasonably want uint8 for small examples,
+uint16 for bigger ones, etc.
+-/
+def ofNatList (dtype : Dtype) (ns : List Nat) : Err Tensor := do
+  if !dtype.isUint then .error "not a uint type" else
+  let size := dtype.itemsize
+  let arr := Tensor.zeros dtype (Shape.mk [ns.length])
   let mut data := arr.data
   let mut posn := 0
-  for x in xs do
-    let v := typ.toByteArray x
-    data := v.copySlice 0 data posn typ.itemsize
-    posn := posn + arr.itemsize
-  { arr with data := data }
+  for n in ns do
+    let v <- dtype.byteArrayOfNat n
+    data := v.copySlice 0 data posn size
+    posn := posn + size
+  .ok { arr with data := data }
 
--- Since the DimIndex is independent of the dtype size, we need to recompute the strides
--- TODO: Would be better to not recompute this over and over. We should find a place to store
--- the 1-based default strides
-def getDimIndex [Element a] (x : Tensor) (index : DimIndex) : Err a :=
-  let offset := Shape.dimIndexToOffset x.unitStrides index
-  let posn := x.startIndex + offset
+def ofNatList! (dtype : Dtype) (ns : List Nat) : Tensor := get! $ ofNatList dtype ns
+
+def ofIntList (dtype : Dtype) (ns : List Int) : Err Tensor := do
+  if !dtype.isInt then .error "not an int type" else
+  let size := dtype.itemsize
+  let arr := Tensor.zeros dtype (Shape.mk [ns.length])
+  let mut data := arr.data
+  let mut posn := 0
+  for n in ns do
+    let v <- dtype.byteArrayOfInt n
+    data := v.copySlice 0 data posn size
+    posn := posn + size
+  .ok { arr with data := data }
+
+def ofIntList! (dtype : Dtype) (ns : List Int) : Tensor := get! $ ofIntList dtype ns
+
+def getDimIndex (arr : Tensor) (index : DimIndex) : Err ByteArray :=
+  if arr.shape.ndim != index.length then .error "getDimIndex: index mismatch" else
+  let offset := Shape.dimIndexToOffset arr.unitStrides index
+  let posn := arr.startIndex + offset
+  if posn < 0 then .error s!"Illegal position: {posn}" else
+  let res := getPosition arr posn.toNat
+  .ok res
+
+def getDimIndex! (arr : Tensor) (index : DimIndex) : ByteArray := get! $ getDimIndex arr index
+
+#guard
+  let arr := arrayScalarNat! Dtype.uint8 25
+  let v := getDimIndex! arr []
+  v.data == #[25]
+
+def setDimIndex (arr : Tensor) (index : DimIndex) (v : ByteArray) : Err Tensor :=
+  let offset := Shape.dimIndexToOffset arr.unitStrides index
+  let posn := arr.startIndex + offset
   if posn < 0 then .error s!"Illegal position: {posn}"
-  else getPosition x posn.toNat
+  else .ok $ setPosition arr posn.toNat v
 
-def setDimIndex [Element a] (x : Tensor) (index : DimIndex) (v : a): Err Tensor :=
-  let offset := Shape.dimIndexToOffset x.unitStrides index
-  let posn := x.startIndex + offset
-  if posn < 0 then .error s!"Illegal position: {posn}"
-  else setPosition x posn.toNat v
+def toList (arr : Tensor) : Err (List ByteArray) :=
+  arr.shape.allDimIndices.mapM (getDimIndex arr)
 
--- TODO: remove `Err` by proving all indices are within range
-def toList (a : Type) [Tensor.Element a] (x : Tensor) : Err (List a) :=
-  x.shape.allDimIndices.mapM (getDimIndex x)
-
-def toList! (a : Type) [Tensor.Element a] (x : Tensor) : List a := match toList a x with
-| .error _ => []
-| .ok x => x
-
-instance BV8Native : Element BV8 where
-  dtype := Dtype.mk .uint8 .oneByte
-  itemsize := 1
-  ofNat n := n
-  toByteArray (x : BV8) : ByteArray := x.toByteArray
-  fromByteArray arr startIndex := ByteArray.toBV8 arr startIndex
-
-instance Int8Native : Element Int8 where
-  dtype := Dtype.mk .int8 .oneByte
-  itemsize := 1
-  ofNat n := n.toInt8
-  toByteArray (x : Int8) : ByteArray := [x.toUInt8].toByteArray
-  fromByteArray arr startIndex := (ByteArray.toBV8 arr startIndex).map fun b => Int8.mk b.toUInt8
-
-#guard Int8Native.fromByteArray (Int8Native.toByteArray (-5)) 0 == .ok (-5)
-
-instance BV16Little : Element BV16 where
-  dtype := Dtype.mk .uint16 .littleEndian
-  itemsize := 2
-  ofNat n := n
-  toByteArray (x : BV16) : ByteArray := x.toByteArray .littleEndian
-  fromByteArray arr startIndex := ByteArray.toBV16 arr startIndex .littleEndian
-
-#guard (arange BV16 10).size == 10
-#guard toList! BV16 (Tensor.Element.arange BV16 10) == [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-
-instance BV32Little : Element BV32 where
-  dtype := Dtype.mk .uint32 .littleEndian
-  itemsize := 4
-  ofNat n := n
-  toByteArray (x : BV32) : ByteArray := x.toByteArray .littleEndian
-  fromByteArray arr startIndex := ByteArray.toBV32 arr startIndex .littleEndian
-
-instance BV64Little : Element BV64 where
-  dtype := Dtype.mk .uint64 .littleEndian
-  itemsize := 8
-  ofNat n := n
-  toByteArray (x : BV64) : ByteArray := x.toByteArray .littleEndian
-  fromByteArray arr startIndex := ByteArray.toBV64 arr startIndex .littleEndian
-
-instance Int64Little : Element Int64 where
-  dtype := Dtype.mk .int64 .littleEndian
-  itemsize := 8
-  ofNat := Int64.ofNat
-  toByteArray x : ByteArray := ByteOrder.bitVecToByteArray .littleEndian 64 x.toBitVec
-  fromByteArray arr startIndex := .ok (ByteOrder.bytesToInt .littleEndian (arr.extract startIndex (startIndex + 8))).toInt64
-
-#guard (Int64Little.toByteArray 7).toList == [7, 0, 0, 0, 0, 0, 0, 0]
-#guard (Int64Little.toByteArray (-2)).toList == [0xFE, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
-
-private def roundTrip64 (n : Int64) := Int64Little.fromByteArray (Int64Little.toByteArray n) 0
-
-#guard roundTrip64 (-2) == .ok (-2)
-#guard roundTrip64 0 == .ok 0
-#guard roundTrip64 2 == .ok 2
-#guard roundTrip64 0xFFFFFFFFFFFFFFFF == .ok 0xFFFFFFFFFFFFFFFF
-
-end Element
+/-
+Similar to np.array_equal, but requires the dtype to be the same
+-/
+def arrayEqual (x y : Tensor) : Bool :=
+  x.dtype == y.dtype && x.shape == y.shape && match x.toList, y.toList with
+  | .error _, _ | _, .error _ => false
+  | .ok xs, .ok ys => xs.length == ys.length && (xs.zip ys).all fun (x, y) => x == y
 
 namespace Format
 open Std.Format
@@ -449,35 +439,67 @@ inductive Tree a where
 | node (xs: List (Tree a))
 deriving BEq, Repr, Inhabited
 
-private def toTree {a : Type} (x : List a) (strides : Strides) : Err (Tree a) :=
-  if strides.any fun x => x <= 0 then .error "strides need to be positive" else
-  match strides with
-  | [] => if x.length == 1 then .ok (.root x) else .error "empty shape that's not an array scalar"
-  | [1] => .ok (.root x)
-  | [_] => .error "not a unit stride"
-  | stride :: strides => do
-    let chunks := x.toChunks stride.toNat
-    let res <- chunks.mapM (fun x => toTree x strides)
-    return .node res
+namespace Tree
 
-private def toTree! {a : Type} (x : List a) (strides : Strides) : Tree a := match toTree x strides with
-| .error _ => .root []
-| .ok t => t
+-- Traverse the left-most branch to infer the shape. Don't bother checking that it's uniform
+-- since presumably it was created by a `arr.toTree` variant.
+private def inferShape (t : Tree a) : List Nat := match t with
+| .root xs => [xs.length]
+| .node [] => impossible
+| .node (t :: ts) => (1 + ts.length) :: inferShape t
 
-#guard toTree! (Element.toList! BV16 (Element.arange BV16 10)) [5, 1] == .node [.root [0, 1, 2, 3, 4], .root [5, 6, 7, 8, 9]]
+private def mapM [Monad m] (f : a -> m b) (t : Tree a) : m (Tree b) :=
+  map1 f t
+where
+  map1 f
+  | .root xs => do
+    let xs' <- xs.mapM f
+    return .root xs'
+  | .node ts => do
+    let ts' <- mapN f ts
+    return .node ts'
+  mapN f
+  | [] => return []
+  | t :: ts => do
+    let t' <- map1 f t
+    let ts' <- mapN f ts
+    return t' :: ts'
 
-private def formatRoot [Repr a] (xs : List a) : Std.Format := sbracket (joinSep (List.map repr xs) (text ", "))
+private def map (f : a -> Id b) (t : Tree a) : Tree b := mapM f t
 
-private def formatTree1 [Repr a] (shape : List Nat) (t : Tree a) : Err Std.Format :=
+private def formatRoot [Repr a] (xs : List a) : Lean.Format :=
+  sbracket (joinSep (List.map repr xs) (text ", "))
+
+private def formatTree1 [Repr a] (t : Tree a) (shape : List Nat) : Err Std.Format :=
   match shape, t with
   | [], .root [x] => .ok $ repr x
   | [n], .root r => if r.length != n then .error "shape mismatch" else .ok (formatRoot r)
   | n :: shape, .node ts => do
-    let fmts <- ts.traverse (formatTree1 shape)
+    let fmts <- ts.traverse (fun t => formatTree1 t shape)
     if fmts.length != n then .error "head mismatch" else
     let indented := join (fmts.intersperse (", " ++ line))
     .ok (group (nest 2 ("[" ++ indented ++ "]")))
   | _, _ => .error "format mismatch"
+
+def format [Repr a] (t : Tree a) : Err Lean.Format := do
+  let r <- formatTree1 t t.inferShape
+  return join ["array(", r, ")"]
+
+def format! [Repr a] (t : Tree a) : Lean.Format := get! $ format t
+
+end Tree
+
+private def listToTree (arr : List a) (strides : Strides) : Err (Tree a) :=
+  if strides.any fun x => x <= 0 then .error "strides need to be positive" else
+  match strides with
+  | [] => if arr.length == 1 then .ok (.root arr) else .error "empty shape that's not an array scalar"
+  | [1] => .ok (.root arr)
+  | [_] => .error "not a unit stride"
+  | stride :: strides => do
+    let chunks := arr.toChunks stride.toNat
+    let res <- chunks.mapM (fun x => listToTree x strides)
+    return .node res
+
 
 /- This needs some improvement. For example, I'm not able to get the indent to stick
 at the end of the "array("
@@ -489,36 +511,34 @@ array([[0x0000#16, 0x0001#16],
   [0x0004#16, 0x0005#16],
   ...
 -/
-private def formatTree [Repr a] (t : Tree a) (shape : Shape) : Err Std.Format := do
-  let r <- formatTree1 shape.val t
-  return join ["array(", r, ")"]
 
 end Format
 
-def toTree (a : Type) [Repr a] [Element a] (arr : Tensor) : Err (Format.Tree a) := do
-  let xs <- Element.toList a arr
+def toByteArrayTree (arr : Tensor) : Err (Format.Tree ByteArray) := do
+  let xs <- arr.toList
   -- Now that we have the elements in a list, we don't care about the strides `arr` which
   -- could have been complex (e.g. negative). Now we just want standard unit strides over the list
-  Format.toTree xs arr.shape.unitStrides
+  Format.listToTree xs arr.shape.unitStrides
 
-def toTree! (a : Type) [Repr a] [Element a] (x : Tensor) : Format.Tree a := get! $ toTree a x
+def toIntTree (arr : Tensor) : Err (Format.Tree Int) := do
+  let t <- arr.toByteArrayTree
+  t.mapM arr.dtype.byteArrayToInt
 
-def format (a : Type) [Repr a] [Element a] (x : Tensor) : Err Std.Format := do
-  let t <- toTree a x
-  let f <- Format.formatTree t x.shape
-  return f
+def toIntTree! (arr : Tensor) : Format.Tree Int := get! $ toIntTree arr
 
-def str (a : Type) [Repr a] [Tensor.Element a] (x : Tensor) : String := match format a x with
-| .error err => s!"Error: {err}"
-| .ok s => Std.Format.pretty s 120
+def toNatTree (arr : Tensor) : Err (Format.Tree Nat) := do
+  let t <- arr.toByteArrayTree
+  t.mapM arr.dtype.byteArrayToNat
 
-private def dtypeOfNpy (dtype : Npy.Dtype) : Err Dtype := do
-  let order <- match dtype.order with
-  | .bigEndian => .ok .bigEndian
-  | .littleEndian => .ok .littleEndian
-  | .notApplicable => .ok .oneByte
-  | .native => .error "native byte order not supported"
-  .ok $ Dtype.mk dtype.name order
+def toNatTree! (arr : Tensor) : Format.Tree Nat := get! $ toNatTree arr
+
+def formatInt (arr : Tensor) : Err Std.Format := do
+  let t <- arr.toIntTree
+  t.format
+
+def formatNat (arr : Tensor) : Err Std.Format := do
+  let t <- arr.toNatTree
+  t.format
 
 private def dataOfNpy (arr : Npy.Ndarray) : ByteArray :=
   let dst := ByteArray.mkEmpty arr.nbytes
@@ -530,7 +550,10 @@ Probably not a great choice, but sticking with it for now.
 I want to avoid writing .npy files with wrong header data.
 -/
 def ofNpy (arr : Npy.Ndarray) : Err Tensor := do
-  let dtype <- dtypeOfNpy arr.header.descr
+  match arr.order.toByteOrder with
+  | .none => .error "can't convert byte order"
+  | .some order =>
+  let dtype <- Dtype.make arr.dtype.name order
   let shape := arr.header.shape
   let data := dataOfNpy arr
   let startIndex := 0
@@ -557,45 +580,45 @@ private def toNpy (arr : Tensor) : Npy.Ndarray :=
   { header, data, startIndex }
 
 section Test
-open Tensor.Format.Tree
 
-#guard str BV8 (Element.arrayScalar BV8 5) == "array(0x05#8)"
-#guard str BV8 (Element.arange BV8 10) == "array([0x00#8, 0x01#8, 0x02#8, 0x03#8, 0x04#8, 0x05#8, 0x06#8, 0x07#8, 0x08#8, 0x09#8])"
+open TensorLib.Tensor.Format.Tree
 
-private def arr0 := Element.arange BV8 8
-#guard get! ((arr0.copyAndReshape! $ Shape.mk [2, 4]).toTree BV8) == .node [.root [0, 1, 2, 3], .root [4, 5, 6, 7]]
-#guard get! ((arr0.copyAndReshape! $ Shape.mk [1, 2, 4]).toTree BV8) == .node [.node [.root [0, 1, 2, 3], .root [4, 5, 6, 7]]]
+#guard
+  let arr := get! (arrayScalarNat Dtype.uint8 5)
+  let t := get! arr.toNatTree
+  t == .root [5]
 
-private def arr1 := Element.arange BV8 12
-#guard get! ((arr1.copyAndReshape! $ Shape.mk [2, 6]).toTree BV8) == .node [.root [0, 1, 2, 3, 4, 5], .root [6, 7, 8, 9, 10, 11]]
-#guard get! ((arr1.copyAndReshape! $ Shape.mk [2, 3, 2]).toTree BV8) == .node [.node [.root [0, 1], .root [2, 3], .root [4, 5]], .node [.root [6, 7], .root [8, 9], .root [10, 11]]]
+#guard
+  let arr := get! $ arange Dtype.uint16 10
+  let arr := get! $ arr.reshape (Shape.mk [2, 5])
+  let t := get! $ arr.toNatTree
+  t == node [root [0, 1, 2, 3, 4], root [5, 6, 7, 8, 9]]
 
-#guard (zeros (Dtype.float64) $ Shape.mk [2, 2]).nbytes == 2 * 2 * 8
-#guard (zeros (Dtype.float64) $ Shape.mk [2, 2]).data.toList.count 0 == 2 * 2 * 8
-#guard (ones (Dtype.float64) $ Shape.mk [2, 2]).nbytes == 2 * 2 * 8
-#guard (ones (Dtype.float64) $ Shape.mk [2, 2]).data.toList.count 1 == 2 * 2
+#guard (zeros Dtype.float64 $ Shape.mk [2, 2]).nbytes == 2 * 2 * 8
+#guard (zeros Dtype.float64 $ Shape.mk [2, 2]).data.toList.count 0 == 2 * 2 * 8
+#guard (ones Dtype.float64 $ Shape.mk [2, 2]).nbytes == 2 * 2 * 8
+#guard (ones Dtype.float64 $ Shape.mk [2, 2]).data.toList.count 1 == 2 * 2
 
-#guard get! ((Element.ofList BV8 [1, 2, 3]).toTree BV8) == Format.Tree.root [1, 2, 3]
-#guard get! (((Element.ofList BV8 [0, 1, 2, 3, 4, 5]).reshape! (Shape.mk [2, 3])).toTree BV8) == .node [.root [0, 1, 2], .root [3, 4, 5]]
+#guard
+  let t1 := get! $ arange Dtype.uint8 6
+  let t2 := get! $ t1.reshape (Shape.mk [2, 3])
+  let t3 := get! $ t2.broadcastTo (Shape.mk [2, 2, 3])
+  let tree := get! $ t3.toNatTree
+  let n1 := node [ root [0, 1, 2], root [3, 4, 5] ]
+  let tree' := node [ n1, n1 ]
+  tree == tree'
 
-#guard let tp := BV8
-      let t1 := (Element.arange tp 6).reshape! (Shape.mk [2, 3])
-      let t2 := get! $ t1.broadcastTo (Shape.mk [2, 2, 3])
-      let tree := get! $ t2.toTree tp
-      let n1 := node [ root [0, 1, 2], root [3, 4, 5] ]
-      let tree' := node [ n1, n1 ]
-      tree == tree'
-
-#guard let tp := BV8
-      let t1 := (Element.arange tp 8).reshape! (Shape.mk [2, 1, 1, 4])
-      let t2 := get! $ t1.broadcastTo (Shape.mk [2, 3, 3, 4])
-      let tree := get! $ t2.toTree tp
-      let r1 := root [0, 1, 2, 3]
-      let r2 := root [4, 5, 6, 7]
-      let n1 := node [ r1, r1, r1 ]
-      let n2 := node [ r2, r2, r2 ]
-      let tree' := node [ node [ n1, n1, n1 ], node [n2, n2, n2] ]
-      tree == tree'
+#guard
+  let t1 := get! $ arange Dtype.uint8 8
+  let t2 := get! $ t1.reshape (Shape.mk [2, 1, 1, 4])
+  let t3 := get! $ t2.broadcastTo (Shape.mk [2, 3, 3, 4])
+  let tree := get! $ t3.toNatTree
+  let r1 := root [0, 1, 2, 3]
+  let r2 := root [4, 5, 6, 7]
+  let n1 := node [ r1, r1, r1 ]
+  let n2 := node [ r2, r2, r2 ]
+  let tree' := node [ node [ n1, n1, n1 ], node [n2, n2, n2] ]
+  tree == tree'
 
 end Test
 

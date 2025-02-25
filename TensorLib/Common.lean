@@ -30,6 +30,9 @@ instance [BEq a] : BEq (Err a) where
   | .error x, .error y => x == y
   | _, _ => false
 
+instance : BEq ByteArray where
+  beq x y := x.data == y.data
+
 def get! [Inhabited a] (x : Err a) : a := match x with
 | .error msg => impossible msg
 | .ok x => x

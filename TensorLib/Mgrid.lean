@@ -333,16 +333,17 @@ def mgrid (slices : List Slice) : Err Tensor := do
       mgridIter := mgridIter'
       if values.length != sliceCount then .error "Invariant failure: value length mismatch"
       for (i, v) in (List.range sliceCount).zip values do
-        let value := Int64.ofInt v
-        arr <- Tensor.Element.setDimIndex arr (i :: index) value
+        let value <- Dtype.byteArrayOfInt Dtype.int64 v
+        arr <- arr.setDimIndex (i :: index) value
   return arr
+
+def mgrid! (slices : List Slice) : Tensor := get! $ mgrid slices
 
 section Test
 
 open Tensor.Format
 
-abbrev tp := Mgrid.elementType
-private def mg (slices : List Slice) : Tree tp := get! $ (get! (mgrid slices)).toTree tp
+private def mg (slices : List Slice) : Tree Int := (mgrid! slices).toIntTree!
 
 #guard (mg [Slice.ofStartStop 2 4, Slice.ofStartStop 4 7]) ==
   .node [
@@ -376,7 +377,7 @@ private def mg (slices : List Slice) : Tree tp := get! $ (get! (mgrid slices)).t
 
 -- 3D
 
-#guard (get! (mgrid [Slice.ofStartStop 2 4, Slice.ofStartStop 4 7, Slice.ofStop 2])).toTree BV64 == .ok (
+#guard (mgrid! [Slice.ofStartStop 2 4, Slice.ofStartStop 4 7, Slice.ofStop 2]).toIntTree! ==
   .node [
     .node [
       .node [
@@ -403,7 +404,6 @@ private def mg (slices : List Slice) : Tree tp := get! $ (get! (mgrid slices)).t
       ]
     ]
   ]
-)
 
 end Test
 end TensorLib
