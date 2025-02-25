@@ -56,7 +56,12 @@ def itemsize (x : Name) : Nat := match x with
 end Name
 end Dtype
 
+/-
+We have a fixed number of Dtype values, defined at the bottom of the namespace.
+Constructor is private so we can't make any more by accident.
+-/
 structure Dtype where
+  private mk ::
   name : Dtype.Name
   order : ByteOrder
 deriving BEq, Repr, Inhabited

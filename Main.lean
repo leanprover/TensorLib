@@ -7,6 +7,7 @@ Authors: Jean-Baptiste Tristan, Paul Govereau, Sean McLaughlin
 import Init.System.IO
 import Cli
 import TensorLib
+import TensorLib.Test
 
 open Cli
 open TensorLib
@@ -14,10 +15,9 @@ open TensorLib
 def format (p : Parsed) : IO UInt32 := do
   let shape : Shape := Shape.mk (p.variableArgsAs! Nat).toList
   IO.println s!"Got shape {shape}"
-  let range := Tensor.Element.arange BV16 shape.count
+  let range := Tensor.arange! Dtype.uint16 shape.count
   let v := range.reshape! shape
-  let s := v.format BV16
-  IO.println s
+  IO.println v.toNatTree!.format!
   return 0
 
 def formatCmd := `[Cli|
@@ -52,8 +52,11 @@ def parseNpyCmd := `[Cli|
 ]
 
 def runTests (_ : Parsed) : IO UInt32 := do
-  -- Just pytest for now, but add Lean tests here as well
-  -- pytest will exit nonzero on it's own, so we don't need to check exit code
+  IO.println "Running Lean tests..."
+  let t0 <- Test.runAllTests
+  if !t0 then do
+    IO.println "Lean tests failed"
+    return 1
   IO.println "Running PyTest..."
   let output <- IO.Process.output { cmd := "pytest" }
   IO.println s!"stdout: {output.stdout}"

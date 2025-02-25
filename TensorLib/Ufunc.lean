@@ -6,6 +6,7 @@ Authors: Jean-Baptiste Tristan, Paul Govereau, Sean McLaughlin
 
 import TensorLib.Broadcast
 import TensorLib.Common
+import TensorLib.Dtype
 import TensorLib.Index
 import TensorLib.Tensor
 
@@ -19,33 +20,32 @@ namespace Ufunc
 
 def DEBUG : Bool := false
 
-private def binop (a : Type) [Element a] (x y : Tensor) (op : a -> a -> Err a) : Err Tensor :=
+private def binop (x y : Tensor) (op : ByteArray -> ByteArray -> Err ByteArray) : Err Tensor :=
+  if x.dtype != y.dtype then .error "Implicit type conversions are not supported" else
   match Broadcast.broadcast { left := x.shape, right := y.shape } with
-  | .none => .error s!"Can't broadcast shapes ${x.shape} with {y.shape}"
-  | .some shape =>
-    if x.dtype != y.dtype then .error s!"Casting between dtypes is not implemented yet: {repr x.dtype} <> {repr y.dtype}" else
-    do
-      let mut arr := Tensor.empty x.dtype shape
-      let iter := DimsIter.make shape
-      for idx in iter do
-        let v <- Element.getDimIndex x idx
-        let w <- Element.getDimIndex y idx
-        let k <- op v w
-        let arr' <- Element.setDimIndex arr idx k
-        arr := arr'
-      .ok arr
+  | .none => .error s!"Can't broadcast shapes: ${x.shape} {y.shape}"
+  | .some shape => do
+    let x <- x.broadcastTo shape
+    let y <- y.broadcastTo shape
+    let mut arr := Tensor.empty x.dtype shape
+    let iter := DimsIter.make shape
+    for idx in iter do
+      let v <- x.getDimIndex idx
+      let w <- y.getDimIndex idx
+      let k <- op v w
+      let arr' <- arr.setDimIndex idx k
+      arr := arr'
+    return arr
 
-def add (a : Type) [Add a] [Element a] (x y : Tensor) : Err Tensor :=
-  binop a x y (fun x y => .ok (x + y))
+def add (x y : Tensor) : Err Tensor := binop x y x.dtype.add
+def sub (x y : Tensor) : Err Tensor := binop x y x.dtype.sub
+def mul (x y : Tensor) : Err Tensor := binop x y x.dtype.mul
+def div (x y : Tensor) : Err Tensor := binop x y x.dtype.div
 
-def sub (a : Type) [Sub a] [Element a] (x y : Tensor) : Err Tensor :=
-  binop a x y (fun x y => .ok (x - y))
-
-def mul (a : Type) [Mul a] [Element a] (x y : Tensor) : Err Tensor :=
-  binop a x y (fun x y => .ok (x * y))
-
-def div (a : Type) [Div a] [Element a] (x y : Tensor) : Err Tensor :=
-  binop a x y (fun x y => .ok (x / y))
+def add! (x y : Tensor) : Tensor := get! $ add x y
+def sub! (x y : Tensor) : Tensor := get! $ sub x y
+def mul! (x y : Tensor) : Tensor := get! $ mul x y
+def div! (x y : Tensor) : Tensor := get! $ div x y
 
 /-
 TODO:
@@ -53,16 +53,19 @@ TODO:
 -/
 
 -- Sum with no axis. Adds all the elements.
-private def sum0 (a : Type) [Add a] [Zero a] [Element a] (arr : Tensor) : Err Tensor := do
-  let mut acc : a := 0
+private def sum0 (arr : Tensor) : Err Tensor := do
+  let dtype := arr.dtype
+  let mut acc := dtype.zero
   let mut iter := DimsIter.make arr.shape
   for index in iter do
-    let n : a <- Element.getDimIndex arr index
-    acc := Add.add acc n
-  return Element.arrayScalar a acc
+    let n <- arr.getDimIndex index
+    let acc' <- dtype.add acc n
+    acc := acc'
+  Tensor.arrayScalar dtype acc
 
 -- Sum with a single axis.
-private def sum1 (a : Type) [Add a] [Zero a] [Element a] (arr : Tensor) (axis : Nat) : Err Tensor := do
+private def sum1 (arr : Tensor) (axis : Nat) : Err Tensor := do
+  let dtype := arr.dtype
   if arr.ndim <= axis then .error "axis out of range" else
   let oldshape := arr.shape
   let (leftShape, rightShape) := oldshape.val.splitAt axis
@@ -72,12 +75,13 @@ private def sum1 (a : Type) [Add a] [Zero a] [Element a] (arr : Tensor) (axis : 
     let newshape := Shape.mk $ leftShape ++ dims
     let mut res := Tensor.zeros arr.dtype newshape
     for index in DimsIter.make newshape do
-      let mut acc : a := 0
+      let mut acc := dtype.zero
       for i in [0:dim] do
         let index' := index.insertIdx axis i
-        let v : a <- Element.getDimIndex arr index'
-        acc := acc + v
-      res <- Element.setDimIndex res index acc
+        let v <- arr.getDimIndex index'
+        let acc' <- dtype.add acc v
+        acc := acc'
+      res <- res.setDimIndex index acc
     return res
 
 -- Remove duplicate elements in a sorted list
@@ -85,24 +89,26 @@ private def uniq [BEq a] (xs : List a) : Bool := match xs with
 | [] | [_] => true
 | x1 :: x2 :: xs => x1 != x2 && uniq (x2 :: xs)
 
-def sum (a : Type) [Add a] [Zero a] [Element a] (arr : Tensor) (axes : Option (List Nat)) : Err Tensor :=
+def sum (arr : Tensor) (axes : Option (List Nat)) : Err Tensor :=
   match axes with
-  | .none => sum0 a arr
+  | .none => sum0 arr
   | .some axes =>
   let axes := (List.mergeSort axes).reverse
   if !(uniq axes) then .error "Duplicate axis elements" else
   match axes with
-  | [] => sum0 a arr
+  | [] => sum0 arr
   | axis :: axes => do
-    let mut res <- sum1 a arr axis
+    let mut res <- sum1 arr axis
     let rec loop (axes : List Nat) (acc : Tensor) : Err Tensor := match axes with
     | [] => .ok acc
     | axis :: axes => do
-      let acc <- sum1 a acc axis
+      let acc <- sum1 acc axis
       let axes := axes.map fun n => n-1 -- When we remove an axis, all later axes point to one dimension less
       loop axes acc
     termination_by axes.length
     loop axes res
+
+def sum! (arr : Tensor) (axes : Option (List Nat)) : Tensor := get! $ sum arr axes
 
 /-
 Implements the dot product. np.dot for 1-D arrays.
@@ -110,23 +116,27 @@ np.dot supports a bunch of other cases, but all of them are reducible to other o
 multiplication by a scalar, matrix multiplication, etc. While we'd like to stay close to NumPy,
 we also would like the author to use the simplest, most natural operations possible.
 -/
-def dot (a : Type) [Add a] [Mul a] [Zero a] [Element a] (x y : Tensor) : Err Tensor := do
-  if x.dtype != y.dtype then .error "Expected same dtype" else
+def dot (x y : Tensor) : Err Tensor := do
+  let dtype := x.dtype
+  if dtype != y.dtype then .error "Expected same dtype" else
   let (xd1, yd1) <- match x.shape.val, y.shape.val with
   | [xd1], [yd1] => .ok (xd1, yd1)
   | [], _ | _, [] => .error "While allowed in NumPy, please use scalar multiplication for array scalars"
   | _, _ => .error "While allowed in NumPy when the dimensions work out, please use matmul for this use case"
   if xd1 != yd1 then .error "dot: reduction dimension mismatch" else
-  let mut acc : a := 0
+  let mut acc := dtype.zero
   for i in [0:xd1] do
-    let u <- Element.getDimIndex x [i]
-    let v <- Element.getDimIndex y [i]
-    acc := acc + u * v
-  return Element.arrayScalar a acc
+    let u <- x.getDimIndex [i]
+    let v <- y.getDimIndex [i]
+    let m <- dtype.mul u v
+    let acc' <- dtype.add acc m
+    acc := acc'
+  Tensor.arrayScalar dtype acc
 
 -- The usual 2D matmul
-private def matmul2 (a : Type) [Add a] [Mul a] [Zero a] [Element a] (x y : Tensor) : Err Tensor := do
-  if x.dtype != y.dtype then .error "Expected same dtype" else
+private def matmul2 (x y : Tensor) : Err Tensor := do
+  let dtype := x.dtype
+  if dtype != y.dtype then .error "Expected same dtype" else
   let (xd1, xd2, yd1, yd2) <- match x.shape.val, y.shape.val with
   | [xd1, xd2], [yd1, yd2] => .ok (xd1, xd2, yd1, yd2)
   | _, _ => .error "Expected 2d arrays"
@@ -134,13 +144,17 @@ private def matmul2 (a : Type) [Add a] [Mul a] [Zero a] [Element a] (x y : Tenso
   let mut res := Tensor.zeros x.dtype (Shape.mk [xd1, yd2])
   for i in [0:xd1] do
     for j in [0:yd2] do
-      let mut acc : a := 0
+      let mut acc := dtype.zero
       for k in [0:xd2] do
-        let u <- Element.getDimIndex x [i, k]
-        let v <- Element.getDimIndex y [k, j]
-        acc := acc + u * v
-      res <- Element.setDimIndex res [i, j] acc
+        let u <- x.getDimIndex [i, k]
+        let v <- y.getDimIndex [k, j]
+        let m <- dtype.mul u v
+        let acc' <- dtype.add acc m
+        acc := acc'
+      res <- res.setDimIndex [i, j] acc
   return res
+
+private def matmul2! (x y : Tensor) : Tensor := get! $ matmul2 x y
 
 /-
 NumPy matmul handles many variants of dimensions.
@@ -152,8 +166,9 @@ For now we'll handle
 
 TODO: I'm not sure what to do with the axis/axes arguments.
 -/
-def matmul (a : Type) [Add a] [Mul a] [Zero a] [Element a] (x y : Tensor) : Err Tensor := do
-  if x.dtype != y.dtype then .error "Expected same dtype" else
+def matmul (x y : Tensor) : Err Tensor := do
+  let dtype := x.dtype
+  if dtype != y.dtype then .error "Expected same dtype" else
   -- The last two dimensions of each array must line up matmul-style
   let (xd1, xd2, xds, yd1, yd2, yds) <- match x.shape.val.reverse, y.shape.val.reverse with
   | [], _ | _, [] => .error "array scalars not allowed"
@@ -164,7 +179,7 @@ def matmul (a : Type) [Add a] [Mul a] [Zero a] [Element a] (x y : Tensor) : Err 
   -- typical broadcast rules, (e.g. [4,2] vs [2,3] to produce a [4,3] matrix.)
   match Broadcast.broadcast { left := Shape.mk xds, right := Shape.mk yds } with
   | none => .error "can't broadcast prefix"
-  | some (Shape.mk []) => matmul2 a x y
+  | some (Shape.mk []) => matmul2 x y
   | some prefixShape =>
   -- First broadcast to get the correct sizes and strides ...
   let xShape := prefixShape.append [xd1, xd2]
@@ -182,13 +197,15 @@ def matmul (a : Type) [Add a] [Mul a] [Zero a] [Element a] (x y : Tensor) : Err 
   let mut res := Tensor.zeros x.dtype resShape
   for i in [0:prefixSize] do
     let index := [Index.NumpyItem.int i]
-    let (x', _) <- Index.apply index x
-    let (y', _) <- Index.apply index y
-    let v <- matmul2 a x' y'
-    res <- Index.assign a res index v
+    let x' <- Index.apply index x
+    let y' <- Index.apply index y
+    let v <- matmul2 x' y'
+    res <- Index.assign res index v
   -- now reshape
   let resShape := prefixShape.append [xd1, yd2]
   res.reshape resShape
+
+private def matmul! (x y : Tensor) : Tensor := get! $ matmul x y
 
 section Test
 open Tensor.Format.Tree
@@ -202,80 +219,82 @@ array([[ 60,  70],
        [160, 195]])
 -/
 #guard
-  let tp := BV8
-  let arr1 := get! $ (Element.arange tp 10).reshape (Shape.mk [2, 5])
-  let arr2 := get! $ (Element.arange tp 10).reshape (Shape.mk [5, 2])
-  let arr3 := get! $ matmul2 tp arr1 arr2
-  arr3.toTree! tp == .node [.root [60, 70], .root [160, 195]]
+  let tp := Dtype.uint8
+  let arr1 := (Tensor.arange! tp 10).reshape! (Shape.mk [2, 5])
+  let arr2 := (Tensor.arange! tp 10).reshape! (Shape.mk [5, 2])
+  let arr3 := matmul2! arr1 arr2
+  arr3.toNatTree! == .node [.root [60, 70], .root [160, 195]]
 
 #guard
-  let tp := BV8
-  let arr := get! $ (Element.arange tp 10).reshape (Shape.mk [2, 5])
-  !(sum tp arr (.some [0, 1, 0])).isOk &&
-  !(sum tp arr (.some [0, 0, 1])).isOk &&
-  !(sum tp arr (.some [7])).isOk
+  let tp := Dtype.uint8
+  let arr := (Tensor.arange! tp 10).reshape! (Shape.mk [2, 5])
+  !(sum arr (.some [0, 1, 0])).isOk &&
+  !(sum arr (.some [0, 0, 1])).isOk &&
+  !(sum arr (.some [7])).isOk
 
--- [[0, 1, 2, 3, 4],
---  [5, 6, 7, 8, 9]]
+/-
+[[0, 1, 2, 3, 4],
+ [5, 6, 7, 8, 9]]
+-/
 #guard
-  let tp := BV8
-  let arr := get! $ (Element.arange tp 10).reshape (Shape.mk [2, 5])
-  let x0 := get! $ sum tp arr .none
-  let x1 := get! $ sum tp arr (.some [])
-  let x2 := get! $ sum tp arr (.some [0])
-  let x3 := get! $ sum tp arr (.some [1])
-  let x4 := get! $ sum tp arr (.some [1, 0])
-  let x5 := get! $ sum tp arr (.some [0, 1])
-  x0.toTree! tp == .root [45]
-  && x1.toTree! tp == .root [45]
-  && x2.toTree! tp == .root [5, 7, 9, 11, 13]
-  && x3.toTree! tp == .root [10, 35]
-  && x4.toTree! tp == .root [45]
-  && x5.toTree! tp == .root [45]
-
-#guard
-  let tp := BV8
-  let x := Element.arange tp 10
-  let arr := get! $ add tp x x
-  arr.toTree! tp == .root [0, 2, 4, 6, 8, 10, 12, 14, 16, 18]
+  let tp := Dtype.uint8
+  let arr := (Tensor.arange! tp 10).reshape! (Shape.mk [2, 5])
+  let x0 := sum! arr .none
+  let x1 := sum! arr (.some [])
+  let x2 := sum! arr (.some [0])
+  let x3 := sum! arr (.some [1])
+  let x4 := sum! arr (.some [1, 0])
+  let x5 := sum! arr (.some [0, 1])
+  x0.toNatTree! == .root [45]
+  && x1.toNatTree! == .root [45]
+  && x2.toNatTree! == .root [5, 7, 9, 11, 13]
+  && x3.toNatTree! == .root [10, 35]
+  && x4.toNatTree! == .root [45]
+  && x5.toNatTree! == .root [45]
 
 #guard
-  let tp := BV8
-  let x := Element.arange tp 10
-  let y := Element.arrayScalar tp 7
-  let arr := get! $ add tp x y
-  arr.toTree! tp == .root [7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+  let tp := Dtype.uint8
+  let x := Tensor.arange! tp 10
+  let arr := add! x x
+  arr.toNatTree! == .root [0, 2, 4, 6, 8, 10, 12, 14, 16, 18]
 
 #guard
-  let tp := BV8
-  let x := (Element.arange tp 6).reshape! (Shape.mk [2, 3])
-  let y := (Element.arange tp 6).reshape! (Shape.mk [3, 2])
-  let z := get! $ matmul tp x y
-  z.toTree! tp == .node [.root [10, 13], .root [28, 40]]
+  let tp := Dtype.uint8
+  let x := Tensor.arange! tp 10
+  let y := Tensor.arrayScalarNat! tp 7
+  let arr := add! x y
+  arr.toNatTree! == .root [7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
 
 #guard
-  let tp := BV8
-  let x := (Element.arange tp 6).reshape! (Shape.mk [1, 2, 3])
-  let y := (Element.arange tp 6).reshape! (Shape.mk [1, 3, 2])
-  let z := get! $ matmul tp x y
-  z.toTree! tp == .node [.node [.root [10, 13], .root [28, 40]]]
+  let tp := Dtype.uint8
+  let x := (Tensor.arange! tp 6).reshape! (Shape.mk [2, 3])
+  let y := (Tensor.arange! tp 6).reshape! (Shape.mk [3, 2])
+  let z := matmul! x y
+  z.toNatTree! == .node [.root [10, 13], .root [28, 40]]
 
 #guard
-  let tp := BV8
-  let x := (Element.arange tp 12).reshape! (Shape.mk [2, 2, 3])
-  let y := (Element.arange tp 6).reshape! (Shape.mk [1, 3, 2])
-  let z := get! $ matmul tp x y
-  z.toTree! tp == .node [
+  let tp := Dtype.uint8
+  let x := (Tensor.arange! tp 6).reshape! (Shape.mk [1, 2, 3])
+  let y := (Tensor.arange! tp 6).reshape! (Shape.mk [1, 3, 2])
+  let z := matmul! x y
+  z.toNatTree! == .node [.node [.root [10, 13], .root [28, 40]]]
+
+#guard
+  let tp := Dtype.uint8
+  let x := (Tensor.arange! tp 12).reshape! (Shape.mk [2, 2, 3])
+  let y := (Tensor.arange! tp 6).reshape! (Shape.mk [1, 3, 2])
+  let z := matmul! x y
+  z.toNatTree! == .node [
     .node [.root [10, 13], .root [28, 40]],
     .node [.root [46, 67], .root [64, 94]]
   ]
 
 #guard
-  let tp := BV8
-  let x := (Element.arange tp 12).reshape! (Shape.mk [2, 1, 2, 3])
-  let y := (Element.arange tp 6).reshape! (Shape.mk [3, 2])
-  let z := get! $ matmul tp x y
-  z.toTree! tp == .node [
+  let tp := Dtype.uint8
+  let x := (Tensor.arange! tp 12).reshape! (Shape.mk [2, 1, 2, 3])
+  let y := (Tensor.arange! tp 6).reshape! (Shape.mk [3, 2])
+  let z := matmul! x y
+  z.toNatTree! == .node [
     .node [.node [.root [10, 13], .root [28, 40]]],
     .node [.node [.root [46, 67], .root [64, 94]]]
   ]
