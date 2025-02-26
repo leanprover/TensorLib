@@ -435,6 +435,30 @@ def arrayEqual (x y : Tensor) : Bool :=
   | .error _, _ | _, .error _ => false
   | .ok xs, .ok ys => xs.length == ys.length && (xs.zip ys).all fun (x, y) => x == y
 
+/-
+Like NumPy's `astype`: https://numpy.org/doc/2.1/reference/generated/numpy.ndarray.astype.html
+Afaict, NumPy never fails due to overflow/underflow during type conversions, so use the "overflow"
+variant of type casting.
+
+`astype` will make a copy of the tensor iff `toDtype != arr.dtype`.
+-/
+def astype (arr : Tensor) (toDtype : Dtype) : Err Tensor := do
+  if arr.dtype == toDtype then .ok arr else
+  let mut res : Tensor := {
+    dtype := toDtype,
+    shape := arr.shape,
+    data := ByteArray.mkEmpty (arr.size * toDtype.itemsize)
+  }
+  let iter := DimsIter.make arr.shape
+  for dimIndex in iter do
+    let v <- arr.getDimIndex dimIndex
+    let v' := Dtype.castOverflow arr.dtype v toDtype
+    let res' <- res.setDimIndex dimIndex v'
+    res := res'
+  return res
+
+def astype! (arr : Tensor) (toDtype : Dtype) : Tensor := get! $ astype arr toDtype
+
 namespace Format
 open Std.Format
 
@@ -624,6 +648,30 @@ open TensorLib.Tensor.Format.Tree
   let n2 := node [ r2, r2, r2 ]
   let tree' := node [ node [ n1, n1, n1 ], node [n2, n2, n2] ]
   tree == tree'
+
+#guard
+  let t := (arange! Dtype.uint8 6).reshape! (Shape.mk [2, 3])
+  let t1 := t.astype! Dtype.uint16
+  let t1 := t1.astype! Dtype.uint8
+  Tensor.arrayEqual t t1
+
+#guard
+  let t := (arange! Dtype.uint8 6).reshape! (Shape.mk [2, 3])
+  let t1 := t.astype! Dtype.uint64
+  let t1 := t1.astype! Dtype.uint32
+  let t1 := t1.astype! Dtype.uint16
+  let t1 := t1.astype! Dtype.uint8
+  Tensor.arrayEqual t t1
+
+#guard
+  let t := (arange! Dtype.uint8 6).reshape! (Shape.mk [2, 3])
+  let t1 := t.astype! Dtype.int8
+  let t1 := t1.astype! Dtype.uint32
+  let t1 := t1.astype! Dtype.uint16
+  let t1 := t1.astype! Dtype.float32
+  let t1 := t1.astype! Dtype.float64
+  let t1 := t1.astype! Dtype.uint8
+  Tensor.arrayEqual t t1
 
 end Test
 

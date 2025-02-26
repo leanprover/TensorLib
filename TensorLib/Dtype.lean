@@ -64,6 +64,62 @@ def itemsize (x : Name) : Nat := match x with
 | int16 | uint16 => 2
 | bool | int8 | uint8 => 1
 
+/-
+In NumPy, I could not get bool coversion to crash. Any non-zero value becomes True, 0 becomes false
+
+# np.array(0x100, dtype='bool')
+array(True)
+
+# np.array(0xFF, dtype='uint8')
+array(255, dtype=uint8)
+
+# np.array(0x100, dtype='uint8')
+OverflowError: Python integer 256 out of bounds for uint8
+
+# np.array(0x7F, dtype='int8')
+array(127, dtype=int8)
+
+# np.array(0x80, dtype='int8')
+OverflowError: Python integer 128 out of bounds for int8
+
+... same patterns for {u,}int{16,32,64}
+
+Float types have named safe nat upper bounds.
+-/
+private def maxSafeNat : Name -> Option Nat
+| .bool => none
+| .uint8 => some 0xFF
+| .int8 => some 0x7F
+| .uint16 => some 0xFFFF
+| .int16 => some 0x7FFF
+| .uint32 => some 0xFFFFFFFF
+| .int32 => some 0x7FFFFFFF
+| .uint64 => some 0xFFFFFFFFFFFFFFFF
+| .int64 => some 0x7FFFFFFFFFFFFFFF
+| .float32 => maxSafeNatForFloat32
+| .float64 => maxSafeNatForFloat
+
+private def canCastFromNat (dtype : Name) (n : Nat) : Bool := n <= dtype.maxSafeNat.getD n
+
+/-
+NumPy doesn't allow casts from negative numbers to uint types, even if they fit.
+# np.array(-0x1, dtype='uint8')
+OverflowError: Python integer -1 out of bounds for uint8
+-/
+private def minSafeInt : Name -> Option Int
+| .bool => none
+| .uint8 | .uint16 | .uint32 | .uint64 => some 0
+| .int8 => some (-0x80)
+| .int16 => some (-0x8000)
+| .int32 => some (-0x80000000)
+| .int64 => some (-0x8000000000000000)
+| .float32 => some (-maxSafeNatForFloat32)
+| .float64 => some (-maxSafeNatForFloat)
+
+private def canCastFromInt (dtype : Name) (n : Int) : Bool :=
+  if n < 0 then dtype.minSafeInt.getD n <= n
+  else n <= dtype.maxSafeNat.getD n.toNat
+
 end Name
 end Dtype
 
@@ -111,31 +167,29 @@ def itemsize (dtype : Dtype) := dtype.name.itemsize
 
 def sizedStrides (dtype : Dtype) (s : Shape) : Strides := List.map (fun x => x * dtype.itemsize) s.unitStrides
 
-/-
-For the signed types below like int8, we could allow up to 0xFF..., but then values above 0x7F...
-give negative numbers, which is confusing.
--/
+private def byteArrayOfNatOverflow (dtype : Dtype) (n : Nat) : ByteArray := match dtype.name with
+| .bool => (BV8.ofNat $ if n == 0 then 0 else 1).toByteArray
+| .uint8 => (BV8.ofNat n).toByteArray
+| .int8 => [(Int8.ofNat n).toUInt8].toByteArray
+| .uint16 => BV16.toByteArray n.toUInt16.toBitVec dtype.order
+| .int16 => BV16.toByteArray n.toInt16.toBitVec dtype.order
+| .uint32 => BV32.toByteArray n.toUInt32.toBitVec dtype.order
+| .int32 => BV32.toByteArray n.toInt32.toBitVec dtype.order
+| .uint64 => BV64.toByteArray n.toUInt64.toBitVec dtype.order
+| .int64 => BV64.toByteArray n.toInt64.toBitVec dtype.order
+| .float32 => match dtype.order with
+  | .littleEndian => n.toFloat32.toLEByteArray
+  | .bigEndian => n.toFloat32.toBEByteArray
+  | .oneByte => impossible -- implies an illegal dtype, which should be impossible
+| .float64 => match dtype.order with
+  | .littleEndian => n.toFloat.toLEByteArray
+  | .bigEndian => n.toFloat.toBEByteArray
+  | .oneByte => impossible
 
-def byteArrayOfNat (dtype : Dtype) (n : Nat) : Err ByteArray := match dtype.name with
-| .bool => if n <= 1 then .ok (BV8.ofNat n).toByteArray else .error "Nat out of bounds for bool"
-| .uint8 => if n <= 0xFF then .ok (BV8.ofNat n).toByteArray else .error "Nat out of bounds for uint8"
-| .int8 => if n <= 0x7F then .ok [(Int8.ofNat n).toUInt8].toByteArray else .error "Nat out of bounds for int8"
-| .uint16 => if n <= 0xFFFF then .ok $ BV16.toByteArray n.toUInt16.toBitVec dtype.order else .error "Nat out of bounds for uint16"
-| .int16 => if n <= 0x7FFF then .ok $ BV16.toByteArray n.toInt16.toBitVec dtype.order else .error "Nat out of bounds for int16"
-| .uint32 => if n <= 0xFFFFFFFF then .ok $ BV32.toByteArray n.toUInt32.toBitVec dtype.order else .error "Nat out of bounds for uint32"
-| .int32 => if n <= 0x7FFFFFFF then .ok $ BV32.toByteArray n.toInt32.toBitVec dtype.order else .error "Nat out of bounds for int32"
-| .uint64 => if n <= 0xFFFFFFFFFFFFFFFF then .ok $ BV64.toByteArray n.toUInt64.toBitVec dtype.order else .error "Nat out of bounds for uint64"
-| .int64 => if n <= 0x7FFFFFFFFFFFFFFF then .ok $ BV64.toByteArray n.toInt64.toBitVec dtype.order else .error "Nat out of bounds for int64"
-| .float32 => if maxSafeNatForFloat32 < n then .error "Nat may not be exactly reprsentable by Float32" else
-  match dtype.order with
-  | .littleEndian => .ok n.toFloat32.toLEByteArray
-  | .bigEndian => .ok n.toFloat32.toBEByteArray
-  | .oneByte => impossible -- implies an illegal dtype, which should be impossible
-| .float64 => if maxSafeNatForFloat < n then .error "Nat may not be exactly reprsentable by Float32" else
-  match dtype.order with
-  | .littleEndian => .ok n.toFloat.toLEByteArray
-  | .bigEndian => .ok n.toFloat.toBEByteArray
-  | .oneByte => impossible -- implies an illegal dtype, which should be impossible
+def byteArrayOfNat (dtype : Dtype) (n : Nat) : Err ByteArray :=
+  let name := dtype.name
+  if name.canCastFromNat n then .ok (dtype.byteArrayOfNatOverflow n)
+  else .error s!"Nat {n} out of bounds for {name}"
 
 def byteArrayOfNat! (dtype : Dtype) (n : Nat) : ByteArray := get! $ byteArrayOfNat dtype n
 
@@ -157,18 +211,25 @@ private def byteArrayToNatRoundTrip (dtype : Dtype) (n : Nat) : Bool :=
 #guard uint8.byteArrayToNatRoundTrip 255
 #guard !uint8.byteArrayToNatRoundTrip 256
 
-def byteArrayOfInt (dtype : Dtype) (n : Int) : Err ByteArray := match dtype.name with
-| .bool => if 0 <= n && n <= 1 then .ok (BV8.ofNat n.toNat).toByteArray else .error "out of bounds"
-| .uint8
-| .int8 => if -0x80 <= n && n <= 0x7F then .ok [n.toInt8.toUInt8].toByteArray else .error "out of bounds"
-| .uint16
-| .int16 => if -0x8000 <= n && n <= 0x7FFF then .ok $ BV16.toByteArray n.toInt16.toBitVec dtype.order else .error "out of bounds"
-| .uint32
-| .int32 => if -0x80000000 <= n && n <= 0x7FFFFFFF then .ok $ BV32.toByteArray n.toInt32.toBitVec dtype.order else .error "out of bounds"
-| .uint64
-| .int64 => if -0x8000000000000000 <= n && n <= 0x7FFFFFFFFFFFFFFF then .ok $ BV64.toByteArray n.toInt64.toBitVec dtype.order else .error "out of bounds"
-| .float32 => .error "Sub-word floats are not yet supported by lean"
-| .float64 => .error "Float not yet supported"
+private def byteArrayOfIntOverflow (dtype : Dtype) (n : Int) : ByteArray := match dtype.name with
+| .bool => (BV8.ofNat $ if n == 0 then 0 else 1).toByteArray
+| .uint8 | .int8 => [n.toInt8.toUInt8].toByteArray
+| .uint16 | .int16 => BV16.toByteArray n.toInt16.toBitVec dtype.order
+| .uint32 | .int32 => BV32.toByteArray n.toInt32.toBitVec dtype.order
+| .uint64 | .int64 => BV64.toByteArray n.toInt64.toBitVec dtype.order
+| .float32 => match dtype.order with
+  | .littleEndian => n.toFloat.toLEByteArray
+  | .bigEndian => n.toFloat.toBEByteArray
+  | .oneByte => impossible
+| .float64 => match dtype.order with
+  | .littleEndian => n.toFloat.toLEByteArray
+  | .bigEndian => n.toFloat.toBEByteArray
+  | .oneByte => impossible
+
+def byteArrayOfInt (dtype : Dtype) (n : Int) : Err ByteArray :=
+  let name := dtype.name
+  if name.canCastFromInt n then .ok (dtype.byteArrayOfIntOverflow n)
+  else .error s!"Int {n} out of bounds for {name}"
 
 def byteArrayOfInt! (dtype : Dtype) (n : Int) : ByteArray := get! $ byteArrayOfInt dtype n
 
@@ -199,26 +260,19 @@ private def byteArrayToFloat (dtype : Dtype) (arr : ByteArray) : Err Float := ma
   | .oneByte => impossible "Illegal dtype. Creation shouldn't have been possible"
 | _ => .error "Illegal type conversion"
 
-def byteArrayToFloat32 (dtype : Dtype) (arr : ByteArray) : Err Float32 := match dtype.name with
-| .float32 =>
-  if arr.size != 4 then .error "byte size mismatch" else
-  match dtype.order with
-  | .littleEndian => .ok $ Float32.ofBits arr.toUInt32LE!
-  | .bigEndian => .ok $ Float32.ofBits arr.toUInt32BE!
-  | .oneByte => impossible "Illegal dtype. Creation shouldn't have been possible"
-| _ => .error "Illegal type conversion"
-
 private def byteArrayToFloat! (dtype : Dtype) (arr : ByteArray) : Float := get! $ byteArrayToFloat dtype arr
 
 private def byteArrayOfFloat (dtype : Dtype) (f : Float) : Err ByteArray := match dtype.name with
 | .float64 => .ok $ BV64.toByteArray f.toBits.toBitVec dtype.order
 | _ => .error "Illegal type conversion"
 
+private def byteArrayOfFloat! (dtype : Dtype) (f : Float) : ByteArray := get! $ byteArrayOfFloat dtype f
+
 def byteArrayOfFloat32 (dtype : Dtype) (f : Float32) : Err ByteArray := match dtype.name with
 | .float32 => .ok $ BV32.toByteArray f.toBits.toBitVec dtype.order
 | _ => .error "Illegal type conversion"
 
-private def byteArrayOfFloat! (dtype : Dtype) (f : Float) : ByteArray := get! $ byteArrayOfFloat dtype f
+private def byteArrayOfFloat32! (dtype : Dtype) (f : Float32) : ByteArray := get! $ byteArrayOfFloat32 dtype f
 
 private def byteArrayToFloatRoundTrip (dtype : Dtype) (f : Float) : Bool :=
   let res := do
@@ -234,134 +288,162 @@ private def byteArrayToFloatRoundTrip (dtype : Dtype) (f : Float) : Bool :=
 #guard float64.byteArrayToFloatRoundTrip (Float.sqrt 2)
 #guard !float32.byteArrayToFloatRoundTrip 0
 
-private def floatToByteArray (f : Float) : Array UInt8 :=
-  (BV64.toByteArray f.toUInt64.toBitVec ByteOrder.littleEndian).data
+def byteArrayToFloat32 (dtype : Dtype) (arr : ByteArray) : Err Float32 := match dtype.name with
+| .float32 =>
+  if arr.size != 4 then .error "byte size mismatch" else
+  match dtype.order with
+  | .littleEndian => .ok $ Float32.ofBits arr.toUInt32LE!
+  | .bigEndian => .ok $ Float32.ofBits arr.toUInt32BE!
+  | .oneByte => impossible "Illegal dtype. Creation shouldn't have been possible"
+| _ => .error "Illegal type conversion"
 
-private def byteToFloatArray (b : UInt8) : Array UInt8 := floatToByteArray (Float.ofNat b.toNat)
+def byteArrayToFloat32! (dtype : Dtype) (arr : ByteArray) : Float32 :=  get! $ byteArrayToFloat32 dtype arr
+
+private def byteArrayToFloat32RoundTrip (dtype : Dtype) (f : Float32) : Bool :=
+  let res := do
+    let arr <- dtype.byteArrayOfFloat32 f
+    let f' <- dtype.byteArrayToFloat32 arr
+    return f == f'
+  res.toOption.getD false
+
+#guard !float64.byteArrayToFloat32RoundTrip 0
+#guard float32.byteArrayToFloat32RoundTrip 0.1
+#guard float32.byteArrayToFloat32RoundTrip (-0)
+#guard float32.byteArrayToFloat32RoundTrip 17
+#guard float32.byteArrayToFloat32RoundTrip (Float32.sqrt 2)
+#guard float32.byteArrayToFloat32RoundTrip 0
 
 /-
-64-bit IEEE-754 floats have 52-bit significand with an implicit leading 1. This means we can
-represent every int in [-2^^53:2^^53]  (0 obviously as well, with a different interpretation of the bits).
-For example, if we had a 3-bit significand and 3-bit exponent we could represent the following contiguous table.
-
-    N : sign exp sig
-    0 : 0    000 0000 -- 0 is denormalized; an all-0 exponent means there's no bias
-    1 : 0    011 0000 -- bias is 0b11 = 3, assumes a leading 1, so (1 + 0) * 2^(3 - 3) = 1
-    2 : 0    100 0000 -- (1 + 0) * 2^(4 - 3) = 2
-    3 : 0    100 1000 -- (1 + .1) * 2^(4 - 3) = 0b11 = 3
-    ...
-             101 1111 -- (1 + .1111) * 2^(5 - 3) = 0b11111 = 31
-            Note: can't use 111 for exponent, which is used for ±infty and nan.
-            We also can't use 110 because we'd skip some not exactly representable ints.
-
-    Negative values of N just switch the sign bit.
-
-    In 64-bit floats, it is 2^53 - 1. This is even named in JavaScript as Number.MAX_SAFE_INTEGER
+NumPy addition overflows and underflows without complaint. We will do the same.
 -/
-private def natToFloatByteArray (n : Nat) : Err (Array UInt8) :=
-  if Nat.pow 2 53 <= n then .error "overflow" else .ok $ floatToByteArray n.toFloat
-
-private def unsignedLEByteArrayToNat (arr : Array UInt8) : Nat := Id.run do
-  let mut res : Nat := 0
-  let mut pow : Nat := 0
-  for byte in arr do
-    res := res + byte.toNat * Nat.pow 2 pow
-    pow := pow + 1
-  return res
-
-private def unsignedBEByteArrayToNat (arr : Array UInt8) : Nat := unsignedLEByteArrayToNat arr.reverse
-
-#guard unsignedLEByteArrayToNat #[1, 0, 1, 1] == 13
-#guard unsignedBEByteArrayToNat #[1, 0, 1, 1] == 11
-
 def add (dtype : Dtype) (x y : ByteArray) : Err ByteArray :=
   if dtype.itemsize != x.size || dtype.itemsize != y.size then .error "add: byte size mismatch" else
   match dtype.name with
+  | .bool => do
+    let x <- dtype.byteArrayToNat x
+    let y <- dtype.byteArrayToNat y
+    if x == 1 || y == 1 then dtype.byteArrayOfInt 1
+    else if x == 0 && y == 0 then dtype.byteArrayOfInt 0
+    else .error "illegal bool bytes"
   | .uint8 | .uint16 | .uint32 | .uint64 => do
-    let x <- byteArrayToNat dtype x
-    let y <- byteArrayToNat dtype y
-    byteArrayOfNat dtype (x + y)
+    let x <- dtype.byteArrayToNat x
+    let y <- dtype.byteArrayToNat y
+    return dtype.byteArrayOfNatOverflow (x + y)
   | .int8 | .int16| .int32 | .int64 => do
-    let x <- byteArrayToInt dtype x
-    let y <- byteArrayToInt dtype y
-    byteArrayOfInt dtype (x + y)
+    let x <- dtype.byteArrayToInt x
+    let y <- dtype.byteArrayToInt y
+    dtype.byteArrayOfInt (x + y)
   | .float32 => do
-    let x <- byteArrayToFloat32 dtype x
-    let y <- byteArrayToFloat32 dtype y
-    byteArrayOfFloat32 dtype (x + y)
+    let x <- dtype.byteArrayToFloat32 x
+    let y <- dtype.byteArrayToFloat32 y
+    dtype.byteArrayOfFloat32 (x + y)
   | .float64 => do
-    let x <- byteArrayToFloat dtype x
-    let y <- byteArrayToFloat dtype y
-    byteArrayOfFloat dtype (x + y)
-  | .bool => .error s!"`add` not supported at type ${dtype.name}"
+    let x <- dtype.byteArrayToFloat x
+    let y <- dtype.byteArrayToFloat y
+    dtype.byteArrayOfFloat (x + y)
 
 def sub (dtype : Dtype) (x y : ByteArray) : Err ByteArray :=
   if dtype.itemsize != x.size || dtype.itemsize != y.size then .error "sub: byte size mismatch" else
   match dtype.name with
   | .uint8 | .uint16 | .uint32 | .uint64 => do
-    let x <- byteArrayToNat dtype x
-    let y <- byteArrayToNat dtype y
-    byteArrayOfNat dtype (x - y)
+    let x <- dtype.byteArrayToNat x
+    let y <- dtype.byteArrayToNat y
+    return dtype.byteArrayOfNatOverflow (x - y)
   | .int8 | .int16| .int32 | .int64 => do
-    let x <- byteArrayToInt dtype x
-    let y <- byteArrayToInt dtype y
-    byteArrayOfInt dtype (x - y)
+    let x <- dtype.byteArrayToInt x
+    let y <- dtype.byteArrayToInt y
+    return dtype.byteArrayOfIntOverflow (x - y)
   | .float32 => do
-    let x <- byteArrayToFloat32 dtype x
-    let y <- byteArrayToFloat32 dtype y
-    byteArrayOfFloat32 dtype (x - y)
+    let x <- dtype.byteArrayToFloat32 x
+    let y <- dtype.byteArrayToFloat32 y
+    dtype.byteArrayOfFloat32 (x - y)
   | .float64 => do
-    let x <- byteArrayToFloat dtype x
-    let y <- byteArrayToFloat dtype y
-    byteArrayOfFloat dtype (x - y)
+    let x <- dtype.byteArrayToFloat x
+    let y <- dtype.byteArrayToFloat y
+    dtype.byteArrayOfFloat (x - y)
   | .bool => .error s!"`sub` not supported at type ${dtype.name}"
 
 def mul (dtype : Dtype) (x y : ByteArray) : Err ByteArray :=
   if dtype.itemsize != x.size || dtype.itemsize != y.size then .error "mul: byte size mismatch" else
   match dtype.name with
   | .uint8 | .uint16 | .uint32 | .uint64 => do
-    let x <- byteArrayToNat dtype x
-    let y <- byteArrayToNat dtype y
-    byteArrayOfNat dtype (x * y)
+    let x <- dtype.byteArrayToNat x
+    let y <- dtype.byteArrayToNat y
+    return dtype.byteArrayOfNatOverflow (x * y)
   | .int8 | .int16| .int32 | .int64 => do
-    let x <- byteArrayToInt dtype x
-    let y <- byteArrayToInt dtype y
-    byteArrayOfInt dtype (x * y)
+    let x <- dtype.byteArrayToInt x
+    let y <- dtype.byteArrayToInt y
+    return dtype.byteArrayOfIntOverflow (x * y)
   | .float32 => do
-    let x <- byteArrayToFloat32 dtype x
-    let y <- byteArrayToFloat32 dtype y
-    byteArrayOfFloat32 dtype (x * y)
+    let x <- dtype.byteArrayToFloat32 x
+    let y <- dtype.byteArrayToFloat32 y
+    dtype.byteArrayOfFloat32 (x * y)
   | .float64 => do
-    let x <- byteArrayToFloat dtype x
-    let y <- byteArrayToFloat dtype y
-    byteArrayOfFloat dtype (x * y)
+    let x <- dtype.byteArrayToFloat x
+    let y <- dtype.byteArrayToFloat y
+    dtype.byteArrayOfFloat (x * y)
   | .bool => .error s!"`mul` not supported at type ${dtype.name}"
 
 def div (dtype : Dtype) (x y : ByteArray) : Err ByteArray :=
   if dtype.itemsize != x.size || dtype.itemsize != y.size then .error "div: byte size mismatch" else
   match dtype.name with
   | .uint8 | .uint16 | .uint32 | .uint64 => do
-    let x <- byteArrayToNat dtype x
-    let y <- byteArrayToNat dtype y
-    byteArrayOfNat dtype (x / y)
+    let x <- dtype.byteArrayToNat x
+    let y <- dtype.byteArrayToNat y
+    return dtype.byteArrayOfNatOverflow (x / y)
   | .int8 | .int16| .int32 | .int64 => do
-    let x <- byteArrayToInt dtype x
-    let y <- byteArrayToInt dtype y
-    byteArrayOfInt dtype (x / y)
+    let x <- dtype.byteArrayToInt x
+    let y <- dtype.byteArrayToInt y
+    return dtype.byteArrayOfIntOverflow (x / y)
   | .float32 => do
-    let x <- byteArrayToFloat32 dtype x
-    let y <- byteArrayToFloat32 dtype y
-    byteArrayOfFloat32 dtype (x / y)
+    let x <- dtype.byteArrayToFloat32 x
+    let y <- dtype.byteArrayToFloat32 y
+    dtype.byteArrayOfFloat32 (x / y)
   | .float64 => do
-    let x <- byteArrayToFloat dtype x
-    let y <- byteArrayToFloat dtype y
-    byteArrayOfFloat dtype (x / y)
+    let x <- dtype.byteArrayToFloat x
+    let y <- dtype.byteArrayToFloat y
+    dtype.byteArrayOfFloat (x / y)
   | .bool => .error s!"`div` not supported at type ${dtype.name}"
 
 /-
 This works for int/uint/bool/float. Keep an eye out when we start implementing unusual floating point types.
 -/
 def zero (dtype : Dtype) : ByteArray := ByteArray.mk $ (List.replicate dtype.itemsize (0 : UInt8)).toArray
+
+private def castLEOverflow (fromDtype : Dtype) (data : ByteArray) (toDtype : Dtype) : ByteArray :=
+  if fromDtype.order == ByteOrder.bigEndian || toDtype.order == ByteOrder.bigEndian then impossible "needs littleEndian" else
+  if fromDtype == toDtype then data else
+  match fromDtype.name, toDtype.name with
+  | _, .bool => ByteArray.mk #[if data.data.all fun x => x == 0 then 0 else 1]
+  | .bool, _ | .uint8, _ | .uint16, _ | .uint32, _ | .uint64, _ =>
+    let n := ByteOrder.littleEndian.bytesToNat data
+    toDtype.byteArrayOfNatOverflow n
+  | .int8, _ | .int16, _ | .int32, _ | .int64, _ =>
+    let n := ByteOrder.littleEndian.bytesToInt data
+    toDtype.byteArrayOfIntOverflow n
+  | .float32, .uint8 | .float32, .uint16  | .float32, .uint32 | .float32, .uint64 =>
+    toDtype.byteArrayOfNatOverflow (Float32.ofLEByteArray! data).toNat
+  | .float32, .int8 | .float32, .int16  | .float32, .int32 | .float32, .int64 =>
+    toDtype.byteArrayOfIntOverflow (Float32.ofLEByteArray! data).toInt
+  | .float64, .uint8 | .float64, .uint16  | .float64, .uint32 | .float64, .uint64 =>
+    toDtype.byteArrayOfNatOverflow (Float.ofLEByteArray! data).toNat
+  | .float64, .int8 | .float64, .int16  | .float64, .int32 | .float64, .int64 =>
+    toDtype.byteArrayOfIntOverflow (Float.ofLEByteArray! data).toInt
+  | .float32, .float64 => (Float32.ofLEByteArray! data).toFloat.toLEByteArray
+  | .float64, .float32 => (Float.ofLEByteArray! data).toFloat32.toLEByteArray
+  | .float32, .float32 | .float64, .float64 => impossible
+
+def castOverflow (fromDtype : Dtype) (data : ByteArray) (toDtype : Dtype) : ByteArray :=
+  match fromDtype.order, toDtype.order with
+  | .littleEndian, .littleEndian
+  | .oneByte, .littleEndian
+  | .littleEndian, .oneByte
+  | .oneByte, .oneByte => castLEOverflow fromDtype data toDtype
+  | .bigEndian, .littleEndian
+  | .bigEndian, .oneByte => castLEOverflow { fromDtype with order := .littleEndian } data.reverse toDtype
+  | .bigEndian, .bigEndian => (castLEOverflow { fromDtype with order := .littleEndian } data.reverse toDtype).reverse
+  | .littleEndian, .bigEndian
+  | .oneByte, .bigEndian => (castLEOverflow fromDtype data toDtype).reverse
 
 end Dtype
 end TensorLib

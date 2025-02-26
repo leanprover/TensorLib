@@ -727,6 +727,30 @@ def _root_.ByteArray.toUInt32BE! (bs : ByteArray) : UInt32 :=
   (bs.get! 2).toUInt32 <<< 0x28 |||
   (bs.get! 3).toUInt32 <<< 0x20
 
+-- Assumes arr.size == 4
+def Float32.ofLEByteArray! (arr : ByteArray) : Float32 :=
+  Float32.ofBits arr.toUInt32LE!
+
+-- Assumes arr.size == 8
+def Float.ofLEByteArray! (arr : ByteArray) : Float :=
+  Float.ofBits arr.toUInt64LE!
+
+def _root_.Float32.toNat (f : Float32) : Nat := f.toUInt64.toNat
+
+def _root_.Float32.toInt (f : Float32) : Int :=
+  let neg := f <= 0
+  let f := if neg then -f else f
+  let n := Int.ofNat f.toUInt64.toNat
+  if neg then -n else n
+
+def _root_.Float.toNat (f : Float) : Nat := f.toUInt32.toNat
+
+def _root_.Float.toInt (f : Float) : Int :=
+  let neg := f <= 0
+  let f := if neg then -f else f
+  let n := Int.ofNat f.toUInt64.toNat
+  if neg then -n else n
+
 #guard (
   let n : BV64 := 0x3FFAB851EB851EB8
   do

@@ -299,6 +299,15 @@ array([[ 60,  70],
     .node [.node [.root [46, 67], .root [64, 94]]]
   ]
 
+#guard
+  let shape := Shape.mk [2, 3]
+  let t := (arange! Dtype.int8 6).reshape! shape
+  let t := mul! (arrayScalarInt! Dtype.int8 (-1)) t
+  let t1 := Tensor.ofNatList! Dtype.uint8 [0, 0xFF, 0xFE, 0xFD, 0xFC, 0xFB]
+  let t1 := t1.astype! Dtype.int8
+  let t1 := t1.reshape! shape
+  Tensor.arrayEqual t t1
+
 /-! WIP example NKI kernel
 """
 NKI kernel to compute element-wise addition of two input tensors
