@@ -27,8 +27,21 @@ deriving BEq, Repr, Inhabited
 
 namespace Name
 
+-- Should match the NumPy name of the dtype. We use toString to generate NumPy test code.
 instance : ToString Name where
-  toString x := ((repr x).pretty.splitOn ".").getLast!
+  toString
+  | .bool => "bool"
+  | int8 => "int8"
+  | int16 => "int16"
+  | int32 => "int32"
+  | int64 => "int64"
+  | uint8 => "uint8"
+  | uint16 => "uint16"
+  | uint32 => "uint32"
+  | uint64 => "uint64"
+  | float16 => "float16"
+  | float32 => "float32"
+  | float64 => "float64"
 
 def isOneByte (x : Name) : Bool := match x with
 | bool | int8 | uint8 => true
