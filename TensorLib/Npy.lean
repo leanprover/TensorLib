@@ -90,7 +90,6 @@ def dtypeNameFromNpyString (s : String) : Err Dtype.Name := match s with
 | "u2" => .ok .uint16
 | "u4" => .ok .uint32
 | "u8" => .ok .uint64
-| "f2" => .ok .float16
 | "f4" => .ok .float32
 | "f8" => .ok .float64
 | _ => .error s!"Can't parse {s} as a dtype"
@@ -105,7 +104,6 @@ def dtypeNameToNpyString (t : Dtype.Name) : String := match t with
 | .uint16 => "u2"
 | .uint32 => "u3"
 | .uint64 => "u4"
-| .float16 => "f2"
 | .float32 => "f4"
 | .float64 => "f8"
 
