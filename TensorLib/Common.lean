@@ -685,6 +685,47 @@ def BV64.toByteArray (x : BV64) (ord : ByteOrder) : ByteArray :=
   | .oneByte => []
   (arr.map BV8.toUInt8).toByteArray
 
+/-
+The largest Nat such that it and every smaller Nat can be represented exactly in a 64-bit IEEE-754 float
+https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/MAX_SAFE_INTEGER
+
+The number is one less than 2^(mantissa size)
+https://en.wikipedia.org/wiki/Floating-point_arithmetic
+https://en.wikipedia.org/wiki/Double-precision_floating-point_format
+-/
+private def floatMantissaBits : Nat := 52
+private def float32MantissaBits : Nat := 23
+-- Add 1 to the mantissa length because of the implicit leading 1
+def maxSafeNatForFloat : Nat := Nat.pow 2 (floatMantissaBits + 1) - 1
+def maxSafeNatForFloat32 : Nat := Nat.pow 2 (float32MantissaBits + 1) - 1
+
+def _root_.Int.toFloat (n : Int) : Float := Float.ofInt n
+-- TODO: Use Flaot32.ofInt when https://github.com/leanprover/lean4/pull/7277 is merged, probably in 4.17.0
+def _root_.Int.toFloat32 (n : Int) : Float32 := match n with
+| Int.ofNat n => Float32.ofNat n
+| Int.negSucc n => Float32.neg (Float32.ofNat (Nat.succ n))
+
+def _root_.Float.toLEByteArray (f : Float) : ByteArray := BV64.toByteArray f.toBits.toBitVec ByteOrder.littleEndian
+def _root_.Float.toBEByteArray (f : Float) : ByteArray := BV64.toByteArray f.toBits.toBitVec ByteOrder.bigEndian
+def _root_.Float32.toLEByteArray (f : Float32) : ByteArray := BV32.toByteArray f.toBits.toBitVec ByteOrder.littleEndian
+def _root_.Float32.toBEByteArray (f : Float32) : ByteArray := BV32.toByteArray f.toBits.toBitVec ByteOrder.bigEndian
+
+/-- Interpret a `ByteArray` of size 4 as a little-endian `UInt32`. Missing from Lean stdlib. -/
+def _root_.ByteArray.toUInt32LE! (bs : ByteArray) : UInt32 :=
+  assert! bs.size == 4
+  (bs.get! 3).toUInt32 <<< 0x18 |||
+  (bs.get! 2).toUInt32 <<< 0x10 |||
+  (bs.get! 1).toUInt32 <<< 0x8  |||
+  (bs.get! 0).toUInt32
+
+/-- Interpret a `ByteArray` of size 4 as a big-endian `UInt32`.  Missing from Lean stdlib. -/
+def _root_.ByteArray.toUInt32BE! (bs : ByteArray) : UInt32 :=
+  assert! bs.size == 4
+  (bs.get! 0).toUInt32 <<< 0x38 |||
+  (bs.get! 1).toUInt32 <<< 0x30 |||
+  (bs.get! 2).toUInt32 <<< 0x28 |||
+  (bs.get! 3).toUInt32 <<< 0x20
+
 #guard (
   let n : BV64 := 0x3FFAB851EB851EB8
   do

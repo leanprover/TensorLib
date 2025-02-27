@@ -122,8 +122,16 @@ def byteArrayOfNat (dtype : Dtype) (n : Nat) : Err ByteArray := match dtype.name
 | .int32 => if n <= 0x7FFFFFFF then .ok $ BV32.toByteArray n.toInt32.toBitVec dtype.order else .error "Nat out of bounds for int32"
 | .uint64 => if n <= 0xFFFFFFFFFFFFFFFF then .ok $ BV64.toByteArray n.toUInt64.toBitVec dtype.order else .error "Nat out of bounds for uint64"
 | .int64 => if n <= 0x7FFFFFFFFFFFFFFF then .ok $ BV64.toByteArray n.toInt64.toBitVec dtype.order else .error "Nat out of bounds for int64"
-| .float32 => .error "Sub-word floats are not yet supported by lean"
-| .float64 => .error "Float not yet supported"
+| .float32 => if maxSafeNatForFloat32 < n then .error "Nat may not be exactly reprsentable by Float32" else
+  match dtype.order with
+  | .littleEndian => .ok n.toFloat32.toLEByteArray
+  | .bigEndian => .ok n.toFloat32.toBEByteArray
+  | .oneByte => impossible -- implies an illegal dtype, which should be impossible
+| .float64 => if maxSafeNatForFloat < n then .error "Nat may not be exactly reprsentable by Float32" else
+  match dtype.order with
+  | .littleEndian => .ok n.toFloat.toLEByteArray
+  | .bigEndian => .ok n.toFloat.toBEByteArray
+  | .oneByte => impossible -- implies an illegal dtype, which should be impossible
 
 def byteArrayOfNat! (dtype : Dtype) (n : Nat) : ByteArray := get! $ byteArrayOfNat dtype n
 
@@ -183,16 +191,27 @@ def byteArrayToFloat (dtype : Dtype) (arr : ByteArray) : Err Float := match dtyp
   if arr.size != 8 then .error "byte size mismatch" else
   match dtype.order with
   | .littleEndian => .ok $ Float.ofBits arr.toUInt64LE! -- toUInt64LE! is ok here because we already checked the size
-  | .bigEndian => .ok $ Float.ofBits arr.toUInt64BE! -- toUInt64BE! is ok here because we already checked the size
+  | .bigEndian => .ok $ Float.ofBits arr.toUInt64BE!
   | .oneByte => impossible "Illegal dtype. Creation shouldn't have been possible"
-| .float32 => .error "Unsupported float type. Requires Lean support."
+| _ => .error "Illegal type conversion"
+
+def byteArrayToFloat32 (dtype : Dtype) (arr : ByteArray) : Err Float32 := match dtype.name with
+| .float32 =>
+  if arr.size != 4 then .error "byte size mismatch" else
+  match dtype.order with
+  | .littleEndian => .ok $ Float32.ofBits arr.toUInt32LE!
+  | .bigEndian => .ok $ Float32.ofBits arr.toUInt32BE!
+  | .oneByte => impossible "Illegal dtype. Creation shouldn't have been possible"
 | _ => .error "Illegal type conversion"
 
 def byteArrayToFloat! (dtype : Dtype) (arr : ByteArray) : Float := get! $ byteArrayToFloat dtype arr
 
 def byteArrayOfFloat (dtype : Dtype) (f : Float) : Err ByteArray := match dtype.name with
 | .float64 => .ok $ BV64.toByteArray f.toBits.toBitVec dtype.order
-| .float32 => .error "Unsupported float type. Requires Lean support."
+| _ => .error "Illegal type conversion"
+
+def byteArrayOfFloat32 (dtype : Dtype) (f : Float32) : Err ByteArray := match dtype.name with
+| .float32 => .ok $ BV32.toByteArray f.toBits.toBitVec dtype.order
 | _ => .error "Illegal type conversion"
 
 def byteArrayOfFloat! (dtype : Dtype) (f : Float) : ByteArray := get! $ byteArrayOfFloat dtype f
@@ -266,11 +285,15 @@ def add (dtype : Dtype) (x y : ByteArray) : Err ByteArray :=
     let x <- byteArrayToInt dtype x
     let y <- byteArrayToInt dtype y
     byteArrayOfInt dtype (x + y)
+  | .float32 => do
+    let x <- byteArrayToFloat32 dtype x
+    let y <- byteArrayToFloat32 dtype y
+    byteArrayOfFloat32 dtype (x + y)
   | .float64 => do
     let x <- byteArrayToFloat dtype x
     let y <- byteArrayToFloat dtype y
     byteArrayOfFloat dtype (x + y)
-  | .bool | .float32 => .error s!"`add` not supported at type ${dtype.name}"
+  | .bool => .error s!"`add` not supported at type ${dtype.name}"
 
 def sub (dtype : Dtype) (x y : ByteArray) : Err ByteArray :=
   if dtype.itemsize != x.size || dtype.itemsize != y.size then .error "sub: byte size mismatch" else
@@ -283,11 +306,15 @@ def sub (dtype : Dtype) (x y : ByteArray) : Err ByteArray :=
     let x <- byteArrayToInt dtype x
     let y <- byteArrayToInt dtype y
     byteArrayOfInt dtype (x - y)
+  | .float32 => do
+    let x <- byteArrayToFloat32 dtype x
+    let y <- byteArrayToFloat32 dtype y
+    byteArrayOfFloat32 dtype (x - y)
   | .float64 => do
     let x <- byteArrayToFloat dtype x
     let y <- byteArrayToFloat dtype y
     byteArrayOfFloat dtype (x - y)
-  | .bool | .float32 => .error s!"`sub` not supported at type ${dtype.name}"
+  | .bool => .error s!"`sub` not supported at type ${dtype.name}"
 
 def mul (dtype : Dtype) (x y : ByteArray) : Err ByteArray :=
   if dtype.itemsize != x.size || dtype.itemsize != y.size then .error "mul: byte size mismatch" else
@@ -300,11 +327,15 @@ def mul (dtype : Dtype) (x y : ByteArray) : Err ByteArray :=
     let x <- byteArrayToInt dtype x
     let y <- byteArrayToInt dtype y
     byteArrayOfInt dtype (x * y)
+  | .float32 => do
+    let x <- byteArrayToFloat32 dtype x
+    let y <- byteArrayToFloat32 dtype y
+    byteArrayOfFloat32 dtype (x * y)
   | .float64 => do
     let x <- byteArrayToFloat dtype x
     let y <- byteArrayToFloat dtype y
     byteArrayOfFloat dtype (x * y)
-  | .bool | .float32 => .error s!"`mul` not supported at type ${dtype.name}"
+  | .bool => .error s!"`mul` not supported at type ${dtype.name}"
 
 def div (dtype : Dtype) (x y : ByteArray) : Err ByteArray :=
   if dtype.itemsize != x.size || dtype.itemsize != y.size then .error "div: byte size mismatch" else
@@ -317,11 +348,15 @@ def div (dtype : Dtype) (x y : ByteArray) : Err ByteArray :=
     let x <- byteArrayToInt dtype x
     let y <- byteArrayToInt dtype y
     byteArrayOfInt dtype (x / y)
+  | .float32 => do
+    let x <- byteArrayToFloat32 dtype x
+    let y <- byteArrayToFloat32 dtype y
+    byteArrayOfFloat32 dtype (x / y)
   | .float64 => do
     let x <- byteArrayToFloat dtype x
     let y <- byteArrayToFloat dtype y
     byteArrayOfFloat dtype (x / y)
-  | .bool | .float32 => .error s!"`div` not supported at type ${dtype.name}"
+  | .bool => .error s!"`div` not supported at type ${dtype.name}"
 
 /-
 This works for int/uint/bool/float. Keep an eye out when we start implementing unusual floating point types.
