@@ -12,10 +12,10 @@ lean_exe "tensorlib" where
   root := `Main
 
 require aesop from git
-  "https://github.com/leanprover-community/aesop" @ "v4.15.0"
+  "https://github.com/leanprover-community/aesop" @ "v4.16.0"
 
 require plausible from git
-  "https://github.com/leanprover-community/plausible" @ "v4.15.0"
+  "https://github.com/leanprover-community/plausible" @ "v4.16.0"
 
 require Cli from git
-  "https://github.com/leanprover/lean4-cli.git" @ "v2.2.0-lv4.14.0-rc1"
+  "https://github.com/leanprover/lean4-cli.git" @ "v4.16.0"
