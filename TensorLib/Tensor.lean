@@ -233,7 +233,7 @@ to capture that pattern. My guess is that there is we can figure out if we need
 a copy by looking at startPosition, shape, and strides.
 -/
 private def copyAndReshape (arr : Tensor) (shape : Shape) : Err Tensor :=
-  if arr.shape.count != shape.count then .error "Incompatible shapes" else
+  if arr.shape.count != shape.count then .error s!"Incompatible shapes: {arr.shape} {shape}" else
   let arr := arr.copy
   .ok { arr with shape, unitStrides := shape.unitStrides }
 
@@ -242,7 +242,7 @@ def copyAndReshape! (arr : Tensor) (shape : Shape) : Tensor :=
 
 def reshape (arr : Tensor) (shape : Shape) : Err Tensor :=
   if arr.shape == shape then .ok arr else
-  if arr.shape.count != shape.count then .error "Incompatible shapes" else
+  if arr.shape.count != shape.count then .error s!"Incompatible shapes: {arr.shape} {shape}" else
   if arr.isTriviallyReshapable
   then .ok { arr with shape, unitStrides := shape.unitStrides }
   else copyAndReshape arr shape
@@ -304,6 +304,8 @@ def broadcastTo (arr : Tensor) (shape : Shape) : Err Tensor :=
     let strides <- broadcastStrides (arr.shape.val.zip arr.strides) shape
     .ok $ Tensor.mk arr.dtype shape arr.data arr.startIndex strides
 
+def broadcastTo! (arr : Tensor) (shape : Shape) : Tensor := get! $ broadcastTo arr shape
+
 def broadcast (arr1 : Tensor) (arr2 : Tensor) : Err (Tensor × Tensor) :=
   match Broadcast.broadcast { left := arr1.shape, right := arr2.shape } with
   | none => .error "Can't broadcast"
@@ -321,6 +323,12 @@ def arrayScalarNat (dtype : Dtype) (n : Nat) : Err Tensor := do
   arrayScalar dtype arr
 
 def arrayScalarNat! (dtype : Dtype) (n : Nat) : Tensor := get! $ arrayScalarNat dtype n
+
+def arrayScalarInt (dtype : Dtype) (n : Int) : Err Tensor := do
+  let arr <- dtype.byteArrayOfInt n
+  arrayScalar dtype arr
+
+def arrayScalarInt! (dtype : Dtype) (n : Int) : Tensor := get! $ arrayScalarInt dtype n
 
 def arange (dtype : Dtype) (n : Nat) : Err Tensor := do
   let size := dtype.itemsize
@@ -584,14 +592,13 @@ section Test
 open TensorLib.Tensor.Format.Tree
 
 #guard
-  let arr := get! (arrayScalarNat Dtype.uint8 5)
-  let t := get! arr.toNatTree
+  let arr := arrayScalarNat! Dtype.uint8 5
+  let t := arr.toNatTree!
   t == .root [5]
 
 #guard
-  let arr := get! $ arange Dtype.uint16 10
-  let arr := get! $ arr.reshape (Shape.mk [2, 5])
-  let t := get! $ arr.toNatTree
+  let arr := (arange! Dtype.uint16 10).reshape! (Shape.mk [2, 5])
+  let t := arr.toNatTree!
   t == node [root [0, 1, 2, 3, 4], root [5, 6, 7, 8, 9]]
 
 #guard (zeros Dtype.float64 $ Shape.mk [2, 2]).nbytes == 2 * 2 * 8
@@ -600,19 +607,17 @@ open TensorLib.Tensor.Format.Tree
 #guard (ones Dtype.float64 $ Shape.mk [2, 2]).data.toList.count 1 == 2 * 2
 
 #guard
-  let t1 := get! $ arange Dtype.uint8 6
-  let t2 := get! $ t1.reshape (Shape.mk [2, 3])
-  let t3 := get! $ t2.broadcastTo (Shape.mk [2, 2, 3])
-  let tree := get! $ t3.toNatTree
+  let t1 := (arange! Dtype.uint8 6).reshape! (Shape.mk [2, 3])
+  let t2 := t1.broadcastTo! (Shape.mk [2, 2, 3])
+  let tree := t2.toNatTree!
   let n1 := node [ root [0, 1, 2], root [3, 4, 5] ]
   let tree' := node [ n1, n1 ]
   tree == tree'
 
 #guard
-  let t1 := get! $ arange Dtype.uint8 8
-  let t2 := get! $ t1.reshape (Shape.mk [2, 1, 1, 4])
-  let t3 := get! $ t2.broadcastTo (Shape.mk [2, 3, 3, 4])
-  let tree := get! $ t3.toNatTree
+  let t1 := (arange! Dtype.uint8 8).reshape! (Shape.mk [2, 1, 1, 4])
+  let t2 := t1.broadcastTo! (Shape.mk [2, 3, 3, 4])
+  let tree := t2.toNatTree!
   let r1 := root [0, 1, 2, 3]
   let r2 := root [4, 5, 6, 7]
   let n1 := node [ r1, r1, r1 ]

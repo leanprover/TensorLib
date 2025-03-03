@@ -333,7 +333,7 @@ def mgrid (slices : List Slice) : Err Tensor := do
       mgridIter := mgridIter'
       if values.length != sliceCount then .error "Invariant failure: value length mismatch"
       for (i, v) in (List.range sliceCount).zip values do
-        let value <- Dtype.byteArrayOfInt Dtype.int64 v
+        let value <- Dtype.int64.byteArrayOfInt v
         arr <- arr.setDimIndex (i :: index) value
   return arr
 

@@ -66,12 +66,13 @@ end Test
 
 def natProd (shape : List Nat) : Nat := shape.foldl (fun x y => x * y) 1
 
-
 -- We generally have large tensors, so don't show them by default
 instance ByteArrayRepr : Repr ByteArray where
   reprPrec x _ :=
     if x.size < 100 then x.toList.repr 100 else
     s!"ByteArray of size {x.size}"
+
+def _root_.ByteArray.reverse (arr : ByteArray) : ByteArray := ⟨ arr.data.reverse ⟩
 
 /-!
 NumPy arrays can be stored in big-endian or little-endian order on disk, regardless
@@ -493,7 +494,7 @@ def BV8.toUInt8 (n : BV8) : UInt8 := UInt8.ofNat n.toFin
 
 def BV8.toByteArray (x : BV8) : ByteArray := [x.toUInt8].toByteArray
 
-def ByteArray.toBV8 (x : ByteArray) (startIndex : Nat) : Err BV8 :=
+def _root_.ByteArray.toBV8 (x : ByteArray) (startIndex : Nat) : Err BV8 :=
   let n := startIndex
   if H7 : n < x.size then
     let H0 : n + 0 < x.size := by omega
@@ -527,7 +528,7 @@ theorem BV16.BytesRoundTrip1 (x0 x1 : BV8) :
     unfold BV16.toBytes BV16.ofBytes
     bv_decide
 
-def ByteArray.toBV16 (x : ByteArray) (startIndex : Nat) (order : ByteOrder) : Err BV16 :=
+def _root_.ByteArray.toBV16 (x : ByteArray) (startIndex : Nat) (order : ByteOrder) : Err BV16 :=
   let n := startIndex
   if H7 : n + 1 < x.size then
     let H0 : n + 0 < x.size := by omega
@@ -580,7 +581,7 @@ theorem BV32.BytesRoundTrip1 (x0 x1 x2 x3 : BV8) :
     unfold BV32.toBytes BV32.ofBytes
     bv_decide
 
-def ByteArray.toBV32 (x : ByteArray) (startIndex : Nat) (order : ByteOrder) : Err BV32 :=
+def _root_.ByteArray.toBV32 (x : ByteArray) (startIndex : Nat) (order : ByteOrder) : Err BV32 :=
   let n := startIndex
   if H7 : n + 3 < x.size then
     let H0 : n + 0 < x.size := by omega
@@ -653,7 +654,7 @@ theorem BV64.BytesRoundTrip1 (x0 x1 x2 x3 x4 x5 x6 x7 : BV8) :
     unfold BV64.toBytes BV64.ofBytes
     bv_decide
 
-def ByteArray.toBV64 (x : ByteArray) (startIndex : Nat) (order : ByteOrder) : Err BV64 :=
+def _root_.ByteArray.toBV64 (x : ByteArray) (startIndex : Nat) (order : ByteOrder) : Err BV64 :=
   let n := startIndex
   if H7 : n + 7 < x.size then
     let H0 : n + 0 < x.size := by omega

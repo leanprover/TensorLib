@@ -91,13 +91,17 @@ def uint64 : Dtype := Dtype.mk .uint64 .littleEndian
 def float32 : Dtype := Dtype.mk .float32 .littleEndian
 def float64 : Dtype := Dtype.mk .float64 .littleEndian
 
+def isInt (dtype : Dtype) : Bool := dtype.name.isInt
+def isUint (dtype : Dtype) : Bool := dtype.name.isUint
+def isIntLike (dtype : Dtype) : Bool := dtype.isInt || dtype.isUint
+
 def make (name : Name) (order : ByteOrder) : Err Dtype := match order with
 | .oneByte => if name.isOneByte then .ok $ mk name order else .error "illegal dtype"
 | .littleEndian | .bigEndian => if name.isMultiByte then .ok $ mk name order else .error "illegal dtype"
 
-def byteOrderOk (dtype : Dtype) : Prop := !dtype.name.isMultiByte || (dtype.name.isMultiByte && dtype.order.isMultiByte)
+private def byteOrderOk (dtype : Dtype) : Prop := !dtype.name.isMultiByte || (dtype.name.isMultiByte && dtype.order.isMultiByte)
 
-theorem makeOk (name : Name) (order : ByteOrder) : match make name order with
+private theorem makeOk (name : Name) (order : ByteOrder) : match make name order with
 | .ok dtype => dtype.byteOrderOk
 | .error _ => true := by
   unfold make byteOrderOk Name.isMultiByte Name.isOneByte
@@ -186,7 +190,7 @@ private def byteArrayToIntRoundTrip (dtype : Dtype) (n : Int) : Bool :=
 #guard int8.byteArrayToIntRoundTrip 127
 #guard !int8.byteArrayToIntRoundTrip 255
 
-def byteArrayToFloat (dtype : Dtype) (arr : ByteArray) : Err Float := match dtype.name with
+private def byteArrayToFloat (dtype : Dtype) (arr : ByteArray) : Err Float := match dtype.name with
 | .float64 =>
   if arr.size != 8 then .error "byte size mismatch" else
   match dtype.order with
@@ -204,9 +208,9 @@ def byteArrayToFloat32 (dtype : Dtype) (arr : ByteArray) : Err Float32 := match 
   | .oneByte => impossible "Illegal dtype. Creation shouldn't have been possible"
 | _ => .error "Illegal type conversion"
 
-def byteArrayToFloat! (dtype : Dtype) (arr : ByteArray) : Float := get! $ byteArrayToFloat dtype arr
+private def byteArrayToFloat! (dtype : Dtype) (arr : ByteArray) : Float := get! $ byteArrayToFloat dtype arr
 
-def byteArrayOfFloat (dtype : Dtype) (f : Float) : Err ByteArray := match dtype.name with
+private def byteArrayOfFloat (dtype : Dtype) (f : Float) : Err ByteArray := match dtype.name with
 | .float64 => .ok $ BV64.toByteArray f.toBits.toBitVec dtype.order
 | _ => .error "Illegal type conversion"
 
@@ -214,7 +218,7 @@ def byteArrayOfFloat32 (dtype : Dtype) (f : Float32) : Err ByteArray := match dt
 | .float32 => .ok $ BV32.toByteArray f.toBits.toBitVec dtype.order
 | _ => .error "Illegal type conversion"
 
-def byteArrayOfFloat! (dtype : Dtype) (f : Float) : ByteArray := get! $ byteArrayOfFloat dtype f
+private def byteArrayOfFloat! (dtype : Dtype) (f : Float) : ByteArray := get! $ byteArrayOfFloat dtype f
 
 private def byteArrayToFloatRoundTrip (dtype : Dtype) (f : Float) : Bool :=
   let res := do
@@ -269,10 +273,6 @@ private def unsignedBEByteArrayToNat (arr : Array UInt8) : Nat := unsignedLEByte
 
 #guard unsignedLEByteArrayToNat #[1, 0, 1, 1] == 13
 #guard unsignedBEByteArrayToNat #[1, 0, 1, 1] == 11
-
-def isInt (dtype : Dtype) : Bool := dtype.name.isInt
-def isUint (dtype : Dtype) : Bool := dtype.name.isUint
-def isIntLike (dtype : Dtype) : Bool := dtype.isInt || dtype.isUint
 
 def add (dtype : Dtype) (x y : ByteArray) : Err ByteArray :=
   if dtype.itemsize != x.size || dtype.itemsize != y.size then .error "add: byte size mismatch" else
