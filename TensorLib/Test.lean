@@ -20,7 +20,7 @@ private def saveNumpyArray (expr : String) : IO System.FilePath := do
   return file.addExtension "npy"
 
 private def testTensorElementBV (dtype : Dtype) : IO Bool := do
-  let file <- saveNumpyArray s!"np.arange(20, dtype='{dtype.name}').reshape(5, 4)"
+  let file <- saveNumpyArray s!"np.arange(20, dtype='{dtype}').reshape(5, 4)"
   let npy <- Npy.parseFile file
   let arr <- IO.ofExcept (Tensor.ofNpy npy)
   let _ <- IO.FS.removeFile file
