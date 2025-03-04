@@ -103,14 +103,9 @@ def ones (dtype : Dtype) (shape : Shape) : Tensor := Id.run do
   let itemsize := dtype.itemsize
   let mut data := ByteArray.mkEmpty size
   for i in [0:size] do
-    let byte := match dtype.order with
-    | .oneByte => 1
-    | .littleEndian => if i.mod itemsize == 0 then 1 else 0
-    | .bigEndian => if i.mod itemsize == itemsize - 1 then 1 else 0
+    let byte := if i.mod itemsize == 0 then 1 else 0
     data := data.push byte
   { dtype := dtype, shape := shape, data := data }
-
-def byteOrder (arr : Tensor) : ByteOrder := arr.dtype.order
 
 --! number of dimensions
 def ndim (x : Tensor) : Nat := x.shape.ndim
@@ -157,7 +152,7 @@ where we must have an int/uint Tensor as an argument.
 def intAtDimIndex (arr : Tensor) (dimIndex : DimIndex) : Err Int := do
   if !arr.isIntLike then .error "natAt expects an int tensor" else
   let bytes <- byteArrayAtDimIndex arr dimIndex
-  .ok $ arr.byteOrder.bytesToInt bytes
+  .ok $ bytes.toInt
 
 /-!
 Copy a Tensor's data to new, contiguous storage.
@@ -554,13 +549,13 @@ def toByteArrayTree (arr : Tensor) : Err (Format.Tree ByteArray) := do
 
 def toIntTree (arr : Tensor) : Err (Format.Tree Int) := do
   let t <- arr.toByteArrayTree
-  t.mapM arr.dtype.byteArrayToInt
+  return t.map ByteArray.toInt
 
 def toIntTree! (arr : Tensor) : Format.Tree Int := get! $ toIntTree arr
 
 def toNatTree (arr : Tensor) : Err (Format.Tree Nat) := do
   let t <- arr.toByteArrayTree
-  t.mapM arr.dtype.byteArrayToNat
+  return t.map ByteArray.toNat
 
 def toNatTree! (arr : Tensor) : Format.Tree Nat := get! $ toNatTree arr
 
@@ -572,9 +567,25 @@ def formatNat (arr : Tensor) : Err Std.Format := do
   let t <- arr.toNatTree
   t.format
 
-private def dataOfNpy (arr : Npy.Ndarray) : ByteArray :=
+private def reverseEndianness (arr : ByteArray) (itemsize : Nat) : Err ByteArray := do
+  if arr.size.mod itemsize != 0 then .error "Bytearray size mismatch" else
+  let mut res := ByteArray.mkEmpty arr.size
+  for i in [0:arr.size / itemsize] do
+    let offset := itemsize * i
+    let bytes := arr.extract offset (offset + itemsize)
+    let bytes := bytes.reverse
+    res := res.append bytes
+  return res
+
+private def dataOfNpy (arr : Npy.Ndarray) : Err ByteArray := do
   let dst := ByteArray.mkEmpty arr.nbytes
-  arr.data.copySlice arr.startIndex dst 0 arr.nbytes
+  let copied := arr.data.copySlice arr.startIndex dst 0 arr.nbytes
+  let res <- match arr.order with
+  | .notApplicable
+  | .littleEndian => .ok copied
+  | .bigEndian => reverseEndianness copied arr.itemsize
+  | .native => .error "Native byte ordering is not supported. Please force a byte order when you save the array."
+  return res
 
 /-
 Makes a copy of the data, dropping the header and padding.
@@ -582,21 +593,11 @@ Probably not a great choice, but sticking with it for now.
 I want to avoid writing .npy files with wrong header data.
 -/
 def ofNpy (arr : Npy.Ndarray) : Err Tensor := do
-  match arr.order.toByteOrder with
-  | .none => .error "can't convert byte order"
-  | .some order =>
-  let dtype <- Dtype.make arr.dtype.name order
+  let dtype := arr.dtype.name
   let shape := arr.header.shape
-  let data := dataOfNpy arr
+  let data <- dataOfNpy arr
   let startIndex := 0
   return { dtype, shape, data, startIndex }
-
-private def dtypeToNpy (dtype : Dtype) : Npy.Dtype :=
-  let order := match dtype.order with
-  | .bigEndian => .bigEndian
-  | .littleEndian => .littleEndian
-  | .oneByte => .notApplicable
-  Npy.Dtype.mk dtype.name order
 
 /-
 If we have a non-trivial view, we will need a copy, since strides
@@ -604,9 +605,9 @@ and start positions are not included in the .npy file format
 -/
 private def toNpy (arr : Tensor) : Npy.Ndarray :=
   let arr := if arr.isTriviallyReshapable then arr else arr.copy
-  let descr := dtypeToNpy arr.dtype
+  let descr := Npy.Dtype.mk arr.dtype Npy.ByteOrder.littleEndian
   let shape := arr.shape
-  let header : Npy.Header := { descr, shape }
+  let header : Npy.Header := { descr := descr, shape := shape }
   let data := arr.data
   let startIndex := 0
   { header, data, startIndex }

@@ -48,12 +48,6 @@ deriving BEq, Repr, Inhabited
 
 namespace ByteOrder
 
-def toByteOrder (x : ByteOrder) : Option TensorLib.ByteOrder := match x with
-| .native => none
-| .littleEndian => some .littleEndian
-| .bigEndian => some .bigEndian
-| .notApplicable => some .oneByte
-
 def toChar (x : ByteOrder) := match x with
 | native => '='
 | littleEndian => '<'
@@ -70,7 +64,7 @@ def fromChar (c : Char) : Err ByteOrder := match c with
 end ByteOrder
 
 structure Dtype where
-  name : TensorLib.Dtype.Name
+  name : TensorLib.Dtype
   order : ByteOrder
 deriving BEq, Repr, Inhabited
 
@@ -80,7 +74,7 @@ namespace Dtype
 Parse a numpy dtype. The first character represents the
 byte order: https://numpy.org/doc/2.1/reference/generated/numpy.dtype.byteorder.html
 -/
-def dtypeNameFromNpyString (s : String) : Err Dtype.Name := match s with
+def dtypeNameFromNpyString (s : String) : Err TensorLib.Dtype := match s with
 | "b1" => .ok .bool
 | "i1" => .ok .int8
 | "i2" => .ok .int16
@@ -94,7 +88,7 @@ def dtypeNameFromNpyString (s : String) : Err Dtype.Name := match s with
 | "f8" => .ok .float64
 | _ => .error s!"Can't parse {s} as a dtype"
 
-def dtypeNameToNpyString (t : Dtype.Name) : String := match t with
+def dtypeNameToNpyString (t : TensorLib.Dtype) : String := match t with
 | .bool => "b1"
 | .int8 => "i1"
 | .int16 => "i2"
@@ -153,6 +147,8 @@ namespace Ndarray
 def nbytes (x : Ndarray) : Nat := x.header.descr.itemsize * x.header.shape.count
 
 def dtype (arr : Ndarray) : Dtype := arr.header.descr
+
+def itemsize (arr : Ndarray) : Nat := arr.dtype.itemsize
 
 def order (arr : Ndarray) : ByteOrder := arr.dtype.order
 
