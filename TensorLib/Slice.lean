@@ -156,19 +156,19 @@ Calculating the nat start index of a slice is complicated by the
 NumPy defaults that differ based on direction (forward/backward)
 and negative values.
 -/
-def startOrDefault (s : Slice) (n : Nat) : Nat :=
+def startOrDefault (s : Slice) (dim : Nat) : Nat :=
   let dir := s.dir
   match s.start with
   | .none => match dir with
     | Dir.Forward => 0
-    | Dir.Backward => n - 1
+    | Dir.Backward => dim - 1 -- if dim = 0 then start = 0, which seems the reasonable choice
   | .some k =>
-    if k < -n then 0
-    else if -n <= k && k < 0 then (n + k).toNat
-    else if 0 <= k && k < n then k.toNat
+    if k < -dim then 0
+    else if -dim <= k && k < 0 then (dim + k).toNat
+    else if 0 <= k && k < dim then k.toNat
     else /- n <= k -/ match dir with
-    | Dir.Forward => n
-    | Dir.Backward => n - 1
+    | Dir.Forward => dim
+    | Dir.Backward => dim - 1
 
 /-
 We use an option here to signal that the stopping point for negative step
@@ -180,32 +180,32 @@ I would love to find a representation with straightfoward arithmetic semantics
 that does not require an option for stop, but I could not find one in the presence of
 both postive and negative steps in about an hour of brainstorming.
 -/
-def stopOrDefault (s : Slice) (n : Nat) : Option Nat :=
+def stopOrDefault (s : Slice) (dim : Nat) : Option Nat :=
   match s.stop, s.dir with
-  | .none, .Forward => .some n
+  | .none, .Forward => .some dim
   | .none, .Backward => .none
   | .some k, .Forward =>
-    if k < -n then .some 0
-    else if -n <= k && k < 0 then .some (n + k).toNat
-    else if 0 <= k && k < n then .some k.toNat
-    else /- n <= k -/ .some n
+    if k < -dim then .some 0
+    else if -dim <= k && k < 0 then .some (dim + k).toNat
+    else if 0 <= k && k < dim then .some k.toNat
+    else /- n <= k -/ .some dim
   | .some k, .Backward =>
-    if k < -n then .none
-    else if -n <= k && k < 0 then .some (n + k).toNat
-    else if 0 <= k && k < n then .some k.toNat
-    else /- n <= k -/ .some n
+    if k < -dim then .none
+    else if -dim <= k && k < 0 then .some (dim + k).toNat
+    else if 0 <= k && k < dim then .some k.toNat
+    else /- n <= k -/ .some dim
 
-theorem stopOrDefaultForward (s : Slice) (n : Nat) :
+theorem stopOrDefaultForward (s : Slice) (dim : Nat) :
   match s.dir with
-  | .Forward => (s.stopOrDefault n).isSome
+  | .Forward => (s.stopOrDefault dim).isSome
   | .Backward => True := by
   unfold stopOrDefault
   aesop
 
-theorem stopRange (s : Slice) (n : Nat) :
-  match s.stopOrDefault n with
+theorem stopRange (s : Slice) (dim : Nat) :
+  match s.stopOrDefault dim with
   | .none => True
-  | .some k => k <= n
+  | .some k => k <= dim
 := by
   unfold stopOrDefault
   cases s.stop
@@ -215,7 +215,7 @@ theorem stopRange (s : Slice) (n : Nat) :
   . rename_i k
     cases s.dir
     . simp
-      by_cases H : k < -n
+      by_cases H : k < -dim
       all_goals simp [H]
       by_cases H1 : k < 0
       . aesop (config := { warnOnNonterminal := false })
@@ -223,7 +223,7 @@ theorem stopRange (s : Slice) (n : Nat) :
       . aesop (config := { warnOnNonterminal := false })
         all_goals omega
     . simp
-      by_cases H : k < -n
+      by_cases H : k < -dim
       all_goals simp [H]
       by_cases H1 : k < 0
       . simp [H, H1]
@@ -238,7 +238,14 @@ theorem stopForward (s : Slice) (dim : Nat) (H : s.dir = .Forward) : (s.stopOrDe
 
 def stepOrDefault (s : Slice) : Int := s.step.getD 1
 
-theorem stepForward (s : Slice) (H : s.dir = .Forward) : 0 < s.stepOrDefault := by
+theorem stepOrDefaultNz (s : Slice) : ¬ s.stepOrDefault = 0 := by
+  unfold stepOrDefault
+  cases H : s.step
+  . simp
+  . let H1 := s.stepNz
+    aesop
+
+theorem stepForward {s : Slice} (H : s.dir = .Forward) : 0 < s.stepOrDefault := by
   revert H
   unfold stepOrDefault dir
   cases H1 : s.step
@@ -252,20 +259,21 @@ def defaults (s : Slice) (dim : Nat) : Nat × Option Nat × Int :=
   (s.startOrDefault dim, s.stopOrDefault dim, s.stepOrDefault)
 
 def size (s : Slice) (dim : Nat) : Nat :=
-  -- Can't use `defaults` here because I need equalities below which don't work with tuple splits
-  let start := s.startOrDefault dim
-  let stop := s.stopOrDefault dim
-  let step := s.stepOrDefault
-  match H1 : s.dir, H2 : stop with
-  | .Forward, .none =>
-    let k : False := by
-      have H2 := s.stopForward dim H1
-      aesop
-    nomatch k
+  -- Without a special case for dim = 0, I couldn't figure out how to handle the case when the step is (-1)
+  if dim == 0 then 0 else
+  let (start, stop, step) := s.defaults dim
+  match s.dir, stop with
+  | .Forward, .none => 0 -- Actually impossible due to `stopForward`, but 0 is a sensible default
   | .Forward, .some stop => natDivCeil (stop - start) step.toNat
-  | .Backward, .none => (start + 1) / step.natAbs
+  | .Backward, .none => (start + 1) / step.natAbs -- This is the case that fails when dim = 0 and step = -1
   | .Backward, .some stop => (start - stop) / step.natAbs
 
+#guard (make! .none .none .none).size 0 == 0
+#guard (make! (.some 0) (.some 10) (.some 1)).size 0 == 0
+#guard (make! (.some 10) (.some 0) (.some (-1))).size 0 == 0
+#guard (make! .none .none (.some (-1))).size 0 == 0
+#guard (make! (.some 0) .none (.some (-1))).size 0 == 0
+#guard (make! (.some (-5)) .none (.some (-1))).size 0 == 0
 #guard (make! .none .none .none).size 10 == 10
 #guard (make! .none .none (.some (-1))).size 10 == 10
 #guard (make! .none .none (.some (-2))).size 10 == 5
@@ -279,6 +287,159 @@ def size (s : Slice) (dim : Nat) : Nat :=
 #guard (make! (.some 5) .none (.some (-3))).size 10 == 2
 #guard (make! .none (.some 5) .none).size 10 == 5
 #guard (make! .none (.some 5) (.some (-1))).size 10 == 4
+#guard (make! (.some 100) .none (.some (-1))).size 10 == 10 -- ok if start is past the end of the array
+#guard (make! (.some 100) (.some (-2)) (.some (-1))).size 10 == 1
+
+private theorem size0 (s : Slice) : s.size 0 = 0 := by
+  unfold size defaults stopOrDefault natDivCeil startOrDefault
+  cases H0 : s.dir <;> cases H1 : s.start <;> cases H2 : s.stop <;> simp
+
+
+private theorem add_div_le {a b c d : Nat} (H1 : (b : Nat) < c) (H2 : a <= d) : (a + b) / c ≤ d := by
+  rw [Nat.div_le_iff_le_mul] <;> try omega
+  cases d <;> try omega
+  rename_i d
+  suffices H3 : a + b ≤ (d+1) * c + (c - 1) by omega
+  apply (@Nat.add_le_add a ((d+1)*c) b (c-1)) <;> try omega
+  apply (@Nat.le_trans a (d+1)) <;> try omega
+  apply (@Nat.le_mul_of_pos_right c (d+1))
+  omega
+
+private theorem add_sub_assoc (n m k : Nat) (H : k <= m) : n + m - k = n + (m - k) := by omega
+
+private theorem le_div_le (c : Nat) (H : a ≤ b) : a / c ≤ b := by
+  cases c ; simp
+  rename_i c
+  rw [Nat.div_le_iff_le_mul, Nat.mul_add] <;> try omega
+
+private theorem sizeDim (s : Slice) (dim : Nat) : s.size dim <= dim := by
+  cases H_dim : dim ; simp [size0]
+  rename_i k
+  unfold size defaults stopOrDefault natDivCeil startOrDefault
+  cases H0 : s.dir
+  . have H8 := stepForward H0
+    cases H1 : s.start <;> cases H2 : s.stop <;> generalize H4 : s.stepOrDefault.toNat = step <;> simp_all
+    . rw [add_sub_assoc] <;> try omega
+      apply add_div_le <;> try omega
+    . rename_i a
+      by_cases H5 : a < -(k+1) <;> simp [H5]
+      . rw [Nat.div_eq_of_lt] <;> omega
+      . by_cases H6 : a < 0 <;> simp [H6]
+        . simp [show -(↑k + 1) ≤ a by omega]
+          rw [add_sub_assoc] <;> try omega
+          apply add_div_le <;> omega
+        . simp [show 0 <= a by omega]
+          by_cases H7 : a < ↑k + 1 <;> simp [H7]
+          . rw [add_sub_assoc] <;> try omega
+            apply add_div_le <;> omega
+          . rw [add_sub_assoc] <;> try omega
+            apply add_div_le <;> omega
+    . rename_i a
+      by_cases H5 : a < -(k+1) <;> simp [H5]
+      . rw [add_sub_assoc] <;> try omega
+        apply add_div_le <;> try omega
+      . by_cases H6 : a < 0 <;> simp [H6]
+        . simp [show -(↑k + 1) ≤ a by omega]
+          rw [add_sub_assoc] <;> try omega
+          apply add_div_le <;> omega
+        . simp [show 0 <= a by omega]
+          by_cases H7 : a < ↑k + 1 <;> simp [H7]
+          . rw [add_sub_assoc] <;> try omega
+            apply add_div_le <;> omega
+          . rw [Nat.div_eq_of_lt] <;> omega
+    . rename_i b a
+      by_cases H5 : a < -(k+1) <;> simp [H5]
+      . rw [Nat.div_eq_of_lt] <;> omega
+      . simp [show -(↑k + 1) ≤ a by omega]
+        . by_cases H6 : a < 0 <;> simp [H6]
+          . by_cases H7 : b < -(k+1) <;> simp [H7]
+            . rw [add_sub_assoc] <;> try omega
+              apply add_div_le <;> omega
+            . simp [show -(↑k + 1) ≤ b by omega]
+              by_cases H9 : b < 0 <;> simp [H9]
+              . rw [add_sub_assoc] <;> try omega
+                apply add_div_le <;> omega
+              . simp [show 0 ≤ b ∧ -(↑k + 1) ≤ b by omega]
+                . by_cases H10 : b < k+1 <;> simp [H10]
+                  . rw [add_sub_assoc] <;> try omega
+                    apply add_div_le <;> omega
+                  . rw [add_sub_assoc] <;> try omega
+                    apply add_div_le <;> omega
+          . simp [show 0 <= a by omega]
+            by_cases H7 : a < ↑k + 1 <;> simp [H7]
+            . rw [add_sub_assoc] <;> try omega
+              apply add_div_le <;> omega
+            . by_cases H9 : b < 0
+              . rw [add_sub_assoc] <;> try omega
+                apply add_div_le <;> omega
+              . simp [show 0 ≤ b ∧ -(↑k + 1) ≤ b by omega]
+                . by_cases H10 : b < k+1 <;> simp [H10]
+                  . rw [add_sub_assoc] <;> try omega
+                    apply add_div_le <;> omega
+                  . rw [add_sub_assoc] <;> try omega
+                    apply add_div_le <;> omega
+  . cases H1 : s.start <;> cases H2 : s.stop <;> generalize H4 : s.stepOrDefault.toNat = step <;> simp_all
+    . apply le_div_le ; simp
+    . rename_i a
+      by_cases H5 : a < -(k+1) <;> simp [H5]
+      . apply le_div_le ; simp
+      . by_cases H6 : a < 0 <;> simp [H6]
+        . simp [show -(↑k + 1) ≤ a by omega]
+          apply le_div_le
+          omega
+        . simp [show 0 <= a by omega]
+          by_cases H7 : a < ↑k + 1 <;> simp [H7]
+          . apply le_div_le ; omega
+          . apply le_div_le ; omega
+    . rename_i a
+      by_cases H5 : a < -(k+1) <;> simp [H5]
+      . apply le_div_le ; omega
+      . by_cases H6 : a < 0 <;> simp [H6]
+        . simp [show -(↑k + 1) ≤ a by omega]
+          apply le_div_le ; omega
+        . simp [show 0 <= a by omega]
+          by_cases H7 : a < ↑k + 1 <;> simp [H7]
+          . apply le_div_le ; omega
+          . apply le_div_le ; omega
+    . rename_i b a
+      by_cases H5 : a < -(k+1) <;> simp [H5] <;> by_cases H6 : b < -(k+1) <;> simp [H6]
+      . apply le_div_le ; omega
+      . simp [show -(↑k + 1) ≤ b by omega]
+        . by_cases H7 : b < 0 <;> simp [H7]
+          . apply le_div_le ; omega
+          . simp [show 0 <= b by omega]
+            by_cases H8 : b < k+1 <;> simp [H8]
+            . apply le_div_le ; omega
+            . apply le_div_le ; omega
+      . simp [show -(↑k + 1) ≤ a by omega]
+        by_cases H7 : a < 0 <;> simp [H7]
+        . simp [show 0 ≤ a by omega]
+          by_cases H8 : a < k+1 <;> simp [H8]
+      . simp [show -(↑k + 1) ≤ a by omega]
+        by_cases H7 : a < 0 <;> simp [H7]
+        . simp [show -(k+1) ≤ b by omega]
+          by_cases H8 : b < 0 <;> simp [H8]
+          . apply le_div_le ; omega
+          . simp [show 0 ≤ b by omega]
+            by_cases H9 : b < k+1 <;> simp [H9]
+            . apply le_div_le ; omega
+            . apply le_div_le ; omega
+        . simp [show 0 ≤ a by omega]
+          by_cases H10 : a < k+1 <;> simp [H10]
+          . simp [show -(k+1) ≤ b by omega]
+            by_cases H11 : b < 0 <;> simp [H11]
+            . apply le_div_le ; omega
+            . simp [show 0 ≤ b by omega]
+              by_cases H12 : b < k+1 <;> simp [H12]
+              . apply le_div_le ; omega
+              . apply le_div_le ; omega
+          . simp [show -(k+1) ≤ b by omega]
+            by_cases H11 : b < 0 <;> simp [H11]
+            . apply le_div_le ; omega
+            . simp [show 0 ≤ b by omega]
+              by_cases H12 : b < k+1 <;> simp [H12]
+              . apply le_div_le ; omega
+              . apply le_div_le ; omega
 
 -- Reference implementation. When we do it for real we will use an iterator.
 private partial def sliceList! [Inhabited a] (s : Slice) (xs : List a) : List a :=
