@@ -5,9 +5,10 @@ Authors: Jean-Baptiste Tristan, Paul Govereau, Sean McLaughlin
 -/
 
 import TensorLib.Common
+import TensorLib.Index
+import TensorLib.Iterator
 import TensorLib.Tensor
 import TensorLib.Slice
-import TensorLib.Index
 
 namespace TensorLib
 namespace Mgrid
@@ -33,213 +34,51 @@ array([], dtype=int64)
 Here you may expect the same, and to get [-5, -4, -3, -2, -1], but instead
 we get an empty array.
 -/
-
-/-!
-Iterating over an `mgrid`, which is essentially an infinite array in both directions in any dimension,
-is fundmentally different from iterating over a fixed size array. The iteration code is very similar, but
-combining them made the code overly complex. For example, in the finite case we have Nat indices, and here
-we have Int indices. Details like this made the combination hard to manage.
--/
-structure Iter where
-  private mk ::
-  private start : Int
-  private stop : Int
-  private step : Int
-  private curr : Option Int -- not returned yet, `curr = none` iff the iterator is empty
-  private stepNz : step ≠ 0
-deriving Repr
-
-instance : Inhabited Iter where
-  default := Iter.mk 0 0 1 none H
-    where H : 1 ≠ 0 := by omega
-
-namespace Iter
-
-def peek (iter : Iter) : Option Int := iter.curr
-
-def reset (iter : Iter) : Iter := { iter with curr := some iter.start }
-
-def sliceOf (iter : Iter) : Slice :=
-  let H : some iter.step ≠ some 0 := by simp_all [iter.stepNz]
-  Slice.mk (some iter.start) (some iter.stop) (some iter.step) H
-
-def make (slice : Slice) : Option Iter :=
-  let step := slice.step.getD 1
-  let H : step ≠ 0 := by
-    have H1 := slice.stepNz
-    unfold step
-    cases H : slice.step <;> simp_all
-  match slice.start, slice.stop with
-  | some start, some stop => some $ Iter.mk start stop step (some start) H
-  | _, _ => none
-
-private def make! (slice : Slice) : Iter := match make slice with
-| none => panic "illegal slice"
-| some iter => iter
-
-private def dir (iter : Iter) : Slice.Dir := if iter.step < 0 then .Backward else .Forward
-
-def size (iter : Iter) : Nat :=
-  let sz : Int := match iter.dir with
-  | .Forward => (iter.stop - iter.start) / iter.step
-  | .Backward => (iter.start - iter.stop) / (-iter.step)
-  sz.toNat
-
-def next (iter : Iter) : Option (Int × Iter) := match iter.curr with
-| .none => .none
-| .some curr =>
-  match iter.dir with
-  | .Forward =>
-    let c := curr + iter.step
-    let nextCurr := if iter.stop <= c then none else some c
-    some (curr, { iter with curr := nextCurr })
-  | .Backward =>
-    let c := curr + iter.step
-    let nextCurr := if c <= iter.stop then none else some c
-    some (curr, { iter with curr := nextCurr })
-
-def hasNext (iter : Iter) : Bool := iter.next.isSome
-
-instance [Monad m] : ForIn m Iter Int where
-  forIn {α} [Monad m] (iter : Iter) (x : α) (f : Int -> α -> m (ForInStep α)) : m α := do
-    let mut iter := iter
-    let mut res := x
-    for _ in [0:iter.size] do
-      match iter.next with
-      | .none => break
-      | .some (n, iter') =>
-        iter := iter'
-        match <- f n res with
-        | .yield k =>
-          res := k
-        | .done k =>
-          res := k
-          break
-    return res
-
-private def toList (iter : Iter) : List Int := Id.run do
-  let mut res := []
-  for xs in iter do
-    res := xs :: res
-  return res.reverse
-
-private partial def toList' (iter : Iter) (acc : List Int := []) : List Int :=
-  match iter.next with
-  | none => acc.reverse
-  | some (n, iter) => toList' iter (n :: acc)
-
-#guard (Iter.make! (Slice.make! (.some 3) (.some 6) .none)).toList == [3, 4, 5]
-#guard (Iter.make! (Slice.make! (.some 3) (.some 6) .none)).toList' == [3, 4, 5]
-#guard (Iter.make! (Slice.make! (.some 6) (.some 3) (.some (-1)))).toList == [6, 5, 4]
-#guard (Iter.make! (Slice.make! (.some 6) (.some 3) (.some (-1)))).toList' == [6, 5, 4]
-
-end Iter
-
-def size (slice : Slice) : Option Nat := (Iter.make slice).map Iter.size
-
-structure MgridIter where
-  private mk ::
-  private iters : List Iter
-  private done : Bool
-deriving Inhabited, Repr
+abbrev MgridIter := Iterator.BEList Iterator.IntIter
 
 namespace MgridIter
 
-def ndim (iter : MgridIter) : Nat := iter.iters.length
+def ndim (iter : MgridIter) : Nat := iter.val.length
 
-def make (iters : List Iter) : MgridIter := MgridIter.mk iters.reverse false
+def make (iters : List Iterator.IntIter) : MgridIter := Iterator.BEList.make iters
 
-def componentSize (iter : MgridIter) : Nat := iter.iters.foldl (fun acc iter => acc * iter.size) 1
+def componentSize (iter : MgridIter) : Nat := iter.val.foldl (fun acc iter => acc * iter.size) 1
 
-def size (iter : MgridIter) : Nat := iter.componentSize * iter.ndim
+def tensorSize (iter : MgridIter) : Nat := iter.componentSize * iter.ndim
 
--- The (reversed) current index iteration (not yet returned)
--- The peek is .some by invariant
-private def current (iters : List Iter) : List Int := iters.map (fun iter => iter.peek.getD impossible)
-
--- Returns the current element (that hasn't yet been returned), and the next iterator.
-private def nextWithCarry (iters : List Iter) (carry : Bool) : List Int × Option (List Iter) :=
-  match iters with
-  | [] => ([], if carry then none else some [])
-  | iter :: iters =>
-    match iter.next with
-    | .none => impossible -- We already reset the iterator once we return the max element
-    | .some (n, nextIter) =>
-      if nextIter.hasNext
-      then (n :: current iters, nextIter :: iters)
-      else
-        let iter := iter.reset
-        let (ns, iters) := nextWithCarry iters (carry := true)
-        let iters := iters.map fun b => iter :: b
-        (n :: ns, iters)
-
-def next (giter : MgridIter) : Option (List Int × MgridIter) :=
-  if giter.done then none else
-  let (ns, iters) := nextWithCarry giter.iters false
-  let ns := ns.reverse
-  let giter : MgridIter := match iters with
-  | none => { giter with done := true } -- All slice iterators are maxxed out in this case. Should we check this?
-  | some iters => { giter with iters }
-  some (ns, giter)
-
-instance [Monad m] : ForIn m MgridIter (List Int) where
-  forIn {α} [Monad m] (iter : MgridIter) (x : α) (f : List Int -> α -> m (ForInStep α)) : m α := do
-    let mut iter : MgridIter := iter
-    let mut res := x
-    for _ in [0:iter.componentSize] do
-      match iter.next with
-      | .none => break
-      | .some (ns, iter') =>
-        iter := iter'
-        match <- f ns res with
-        | .yield k => res := k
-        | .done k => return k
-    return res
-
-private def toList (iter : MgridIter) : List (List Int) := Id.run do
-  let mut res := []
-  for xs in iter do
-    res := xs :: res
-  return res.reverse
+def toList (iter : MgridIter) : List (List Int) := Iterator.toList iter
 
 #guard
-  let iter := Iter.make! (Slice.ofStop 3)
-  (MgridIter.make [iter, iter]).toList ==
+  let iter := Iterator.IntIter.make! 0 3 1
+  (make [iter, iter]).toList ==
     [[0, 0], [0, 1], [0, 2],
      [1, 0], [1, 1], [1, 2],
      [2, 0], [2, 1], [2, 2]]
 
 #guard
-  let iter0 := Iter.make! (Slice.ofStop 2)
-  let iter1 := Iter.make! (Slice.make! (some 4) (some 0) (some (-1)))
-  (MgridIter.make [iter0, iter1]).toList ==
+  let iter0 := Iterator.IntIter.make! 0 2 1
+  let iter1 := Iterator.IntIter.make! 4 0 (-1)
+  (make [iter0, iter1]).toList ==
   [[0, 4], [0, 3], [0, 2], [0, 1],
    [1, 4], [1, 3], [1, 2], [1, 1]]
 
 #guard
-  let iter0 := Iter.make! $ Slice.ofStartStop (-4) (-2)
-  let iter1 := Iter.make! $ Slice.make! (some 7) (some 4) (some (-1))
-  let giter := MgridIter.make [iter0, iter1]
-  giter.toList == [
+  let iter0 := Iterator.IntIter.make! (-4) (-2) 1
+  let iter1 := Iterator.IntIter.make! 7 4 (-1)
+  (MgridIter.make [iter0, iter1]).toList == [
     [-4, 7], [-4, 6], [-4, 5],
     [-3, 7], [-3, 6], [-3, 5]
   ]
 
+-- Since there is no dimension, figuring out defaults is tricky. Just fail
+-- if it's not obvious.
+private def sliceToIntIter (slice : Slice) : Err Iterator.IntIter :=
+  let step := slice.step.getD 1
+  match slice.start, slice.stop with
+  | some start, some stop => Iterator.IntIter.make start stop step
+  | _, _ => .error "Can't convert slice to int iterator"
+
 end MgridIter
-
-private def sliceSize (slice : Slice) : Option Nat := (Iter.make slice).map Iter.size
-
-#guard (sliceSize Slice.all).isNone
-#guard (sliceSize (Slice.make! .none (.some 5) .none)).isNone
-#guard (sliceSize (Slice.make! (.some 5) .none .none)).isNone
-#guard (sliceSize (Slice.make! (.some 5) (.some 10) .none)) == .some 5
-#guard (sliceSize (Slice.make! (.some (-5)) (.some (-10)) .none)) == .some 0
-#guard (sliceSize (Slice.make! (.some (-5)) (.some (-10)) (.some (-1)))) == .some 5
-#guard (sliceSize (Slice.make! (.some (-5)) (.some 10) (.some (-1)))) == .some 0
-#guard (sliceSize (Slice.make! (.some (-5)) (.some 10) (.some 1))) == .some 15
-#guard (sliceSize (Slice.make! (.some (-5)) (.some 10) (.some (-3)))) == .some 0
-#guard (sliceSize (Slice.make! (.some (-5)) (.some 10) (.some 3))) == .some 5
-
 end Mgrid
 
 /-
@@ -311,30 +150,24 @@ I think the last one should be the same as the others, just a size-0 dimension.
 -/
 def mgrid (slices : List Slice) : Err Tensor := do
   let sliceCount := slices.length
-  let mut slicesDims : List Nat := []
-  for slice in slices.reverse do
-    match Mgrid.sliceSize slice with
-    | none => .error "Illegal slice"
-    | some sz => slicesDims := sz :: slicesDims
+  let iters <- slices.mapM Mgrid.MgridIter.sliceToIntIter
+  let slicesDims := iters.map (Iterator.size Int)
   let shape := Shape.mk $ sliceCount :: slicesDims
   let slicesShape := Shape.mk slicesDims
   let dtype := Dtype.int64 -- We fix a little-endian uint64 by convention
   let mut arr := Tensor.zeros dtype shape
-  match slices.mapM fun s => Mgrid.Iter.make s with
-  | none => .error "Illegal slice" -- redundant with the sliceSize check above
-  | some iters =>
   let mut mgridIter := Mgrid.MgridIter.make iters
-  let indexIter := DimsIter.make slicesShape
-  if mgridIter.componentSize != indexIter.size then .error "Invariant failure: iterator size mismatch at start"
+  let indexIter := slicesShape.belist
+  if Iterator.size (List Int) mgridIter != Iterator.size (List Nat) indexIter then .error "Invariant failure: iterator size mismatch at start"
   for index in indexIter do
-    match mgridIter.next with
-    | .none => .error "Invariant failure: iterator size mismatch during iteration"
-    | .some (values, mgridIter') =>
-      mgridIter := mgridIter'
-      if values.length != sliceCount then .error "Invariant failure: value length mismatch"
-      for (i, v) in (List.range sliceCount).zip values do
-        let value <- Dtype.int64.byteArrayOfInt v
-        arr <- arr.setDimIndex (i :: index) value
+    let values := Iterator.peek mgridIter
+    if values.length != sliceCount then .error "Invariant failure: value length mismatch"
+    for (i, v) in (List.range sliceCount).zip values do
+      let value <- Dtype.int64.byteArrayOfInt v
+      arr <- arr.setDimIndex (i :: index) value
+    match Iterator.next (List Int) mgridIter with
+    | .none => break
+    | .some mgridIter' => mgridIter := mgridIter'
   return arr
 
 def mgrid! (slices : List Slice) : Tensor := get! $ mgrid slices
@@ -345,15 +178,6 @@ open Tensor.Format
 
 private def mg (slices : List Slice) : Tree Int := (mgrid! slices).toIntTree!
 
-#guard (mg [Slice.ofStartStop 2 4, Slice.ofStartStop 4 7]) ==
-  .node [
-    .node [
-      .root [2, 2, 2], .root [3, 3, 3]
-    ],
-    .node [
-      .root [4, 5, 6], .root [4, 5, 6]
-    ]
- ]
 
 -- 0D
 #guard mg [] == .root []
@@ -364,6 +188,15 @@ private def mg (slices : List Slice) : Tree Int := (mgrid! slices).toIntTree!
 #guard mg [Slice.make! (some 2) (some (-4)) (some (-1))] == .node [.root [2, 1, 0, -1, -2, -3]]
 
 -- 2D
+#guard (mg [Slice.ofStartStop 2 4, Slice.ofStartStop 4 7]) ==
+  .node [
+    .node [
+      .root [2, 2, 2], .root [3, 3, 3]
+    ],
+    .node [
+      .root [4, 5, 6], .root [4, 5, 6]
+    ]
+ ]
 
 #guard mg [Slice.ofStartStop (-4) (-2), Slice.make! (some 7) (some 4) (some (-1))] ==
   .node [

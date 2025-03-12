@@ -9,6 +9,7 @@ import TensorLib.Broadcast
 import TensorLib.Common
 import TensorLib.Dtype
 import TensorLib.Npy
+import TensorLib.Shape
 
 namespace TensorLib
 
@@ -164,8 +165,7 @@ non-contiguous data.
 def copy (arr : Tensor) : Tensor := Id.run do
   let itemsize := arr.dtype.itemsize
   let mut data := ByteArray.mkEmpty arr.nbytes
-  let iter := DimsIter.make arr.shape
-  for dimIndex in iter do
+  for dimIndex in arr.shape.belist do
     let posn := arr.dimIndexToPosition dimIndex
     for j in [0:itemsize] do
       let b := arr.data.get! (posn + j)
@@ -444,8 +444,7 @@ def astype (arr : Tensor) (toDtype : Dtype) : Err Tensor := do
     shape := arr.shape,
     data := ByteArray.mkEmpty (arr.size * toDtype.itemsize)
   }
-  let iter := DimsIter.make arr.shape
-  for dimIndex in iter do
+  for dimIndex in arr.shape.belist do
     let v <- arr.getDimIndex dimIndex
     let v' := Dtype.castOverflow arr.dtype v toDtype
     let res' <- res.setDimIndex dimIndex v'

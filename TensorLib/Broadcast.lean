@@ -6,6 +6,7 @@ Authors: Jean-Baptiste Tristan, Paul Govereau, Sean McLaughlin
 
 import Aesop
 import TensorLib.Common
+import TensorLib.Shape
 
 /-!
 Broadcasting is a convenience and performance trick to allow operations that expect the same

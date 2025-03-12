@@ -5,6 +5,7 @@ Authors: Jean-Baptiste Tristan, Paul Govereau, Sean McLaughlin
 -/
 
 import TensorLib.Common
+import TensorLib.Shape
 
 namespace TensorLib
 

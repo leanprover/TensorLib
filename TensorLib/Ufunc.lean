@@ -8,6 +8,7 @@ import TensorLib.Broadcast
 import TensorLib.Common
 import TensorLib.Dtype
 import TensorLib.Index
+import TensorLib.Iterator
 import TensorLib.Tensor
 
 /-!
@@ -28,8 +29,7 @@ private def binop (x y : Tensor) (op : ByteArray -> ByteArray -> Err ByteArray) 
     let x <- x.broadcastTo shape
     let y <- y.broadcastTo shape
     let mut arr := Tensor.empty x.dtype shape
-    let iter := DimsIter.make shape
-    for idx in iter do
+    for idx in shape.belist do
       let v <- x.getDimIndex idx
       let w <- y.getDimIndex idx
       let k <- op v w
@@ -56,7 +56,7 @@ TODO:
 private def sum0 (arr : Tensor) : Err Tensor := do
   let dtype := arr.dtype
   let mut acc := dtype.zero
-  let mut iter := DimsIter.make arr.shape
+  let mut iter := arr.shape.belist
   for index in iter do
     let n <- arr.getDimIndex index
     let acc' <- dtype.add acc n
@@ -74,7 +74,7 @@ private def sum1 (arr : Tensor) (axis : Nat) : Err Tensor := do
   | dim :: dims =>
     let newshape := Shape.mk $ leftShape ++ dims
     let mut res := Tensor.zeros arr.dtype newshape
-    for index in DimsIter.make newshape do
+    for index in newshape.belist do
       let mut acc := dtype.zero
       for i in [0:dim] do
         let index' := index.insertIdx axis i

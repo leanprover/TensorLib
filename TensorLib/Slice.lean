@@ -6,6 +6,7 @@ Authors: Jean-Baptiste Tristan, Paul Govereau, Sean McLaughlin
 
 import Aesop
 import TensorLib.Common
+import TensorLib.Iterator
 
 namespace TensorLib
 
@@ -294,7 +295,6 @@ private theorem size0 (s : Slice) : s.size 0 = 0 := by
   unfold size defaults stopOrDefault natDivCeil startOrDefault
   cases H0 : s.dir <;> cases H1 : s.start <;> cases H2 : s.stop <;> simp
 
-
 private theorem add_div_le {a b c d : Nat} (H1 : (b : Nat) < c) (H2 : a <= d) : (a + b) / c ≤ d := by
   rw [Nat.div_le_iff_le_mul] <;> try omega
   cases d <;> try omega
@@ -491,8 +491,12 @@ structure Iter where
   private start : Nat
   private stop : Option Nat
   private step : Int
-  private curr : Option Nat -- not returned yet, `curr = none` iff the iterator is empty
+  private stepNz : step ≠ 0
+  peek : Nat
 deriving Repr
+
+instance : Inhabited Iter where
+  default := Iter.mk 1 1 0 none 1 (by simp) 0
 
 namespace Iter
 
@@ -501,96 +505,49 @@ private def dir' (n : Int) : Dir := if 0 <= n then Dir.Forward else Dir.Backward
 def dir (iter : Iter) : Dir := dir' iter.step
 
 -- The only complexity here is deciding whether the iterator starts off empty
--- so we can set `curr` correctly
-def make (slice : Slice) (dim : Nat) : Iter :=
+-- so we can set `peek` correctly
+def make (slice : Slice) (dim : Nat) : Err Iter :=
   let size := slice.size dim
+  -- Can't use `defaults` here because we need the proof that step ≠ 0 and we'd
+  -- need dependent pattern matching.
   let start := slice.startOrDefault dim
   let stop := slice.stopOrDefault dim
   let step := slice.stepOrDefault
-  let curr := match dir' step, stop with
-  | .Forward, _ => if start < stop.getD dim then .some start else .none
-  | .Backward, .none => .some start
+  let stepNz : step ≠ 0 := slice.stepOrDefaultNz
+  let peek := match dir' step, stop with
+  | .Forward, _ => if start < stop.getD dim then some start else .none
+  | .Backward, .none => .some start -- even if start is 0 we get the 0th element
   | .Backward, .some stop => if stop < start then .some start else .none
-  { dim, size, start, stop, step, curr }
+  match peek with
+  | none => .error "Empty iterator"
+  | some peek => .ok { dim, size, start, stop, step, stepNz, peek }
 
-def next (iter : Iter) : Option (Nat × Iter) := match iter.curr with
-| .none => .none
-| .some curr =>
-  match iter.dir with
-  | .Forward =>
-    let stop := iter.stop.getD iter.dim -- we could show that stop.isSome by `stopOrDefaultForward` above so the default is never used
-    let c := (curr + iter.step).toNat
-    let nextCurr := if stop <= c then none else some c
-    some (curr, { iter with curr := nextCurr })
-  | .Backward =>
-    let stop := iter.stop.getD 0
-    let c := curr + iter.step
-    let nextCurr := if c < stop then none else some c.toNat
-    some (curr, { iter with curr := nextCurr })
+def make! (slice : Slice) (dim : Nat) : Iter := get! $ make slice dim
 
-def hasNext (iter : Iter) : Bool := iter.next.isSome
+def next (iter : Iter) : Option Iter := match iter.dir with
+| .Forward =>
+  let stop := iter.stop.getD iter.dim -- we could show that stop.isSome by `stopOrDefaultForward` above so the default is never used
+  let c := (iter.peek + iter.step).toNat
+  if stop <= c then none else some { iter with peek := c }
+| .Backward =>
+  let stop := iter.stop.getD 0
+  let c := iter.peek + iter.step
+  if c < stop then none else some { iter with peek := c.toNat }
 
-def peek (iter : Iter) : Option Nat := iter.curr
+def reset (iter : Iter) : Iter := { iter with peek := iter.start }
 
-def reset (iter : Iter) : Iter := { iter with curr := some iter.start }
+instance iteratorInstance : Iterator Iter Nat where
+  next := next
+  peek := peek
+  reset := reset
+  size := size
 
-instance [Monad m] : ForIn m Iter Nat where
-  forIn {α} [Monad m] (iter : Iter) (x : α) (f : Nat -> α -> m (ForInStep α)) : m α := do
-    let mut iter := iter
-    let mut res := x
-    for _ in [0:iter.size] do
-      match iter.next with
-      | .none => break
-      | .some (n, iter') =>
-        iter := iter'
-        match <- f n res with
-        | .yield k =>
-          res := k
-        | .done k =>
-          res := k
-          break
-    return res
+def toList (iter : Iter) : List Nat := iteratorInstance.toList iter
 
--- TODO: This is the second one of these I've written. Figure out how to add a method
--- to the ForIn type class.
-private def toList (iter : Iter) : List Nat := Id.run do
-  let mut res := []
-  for xs in iter do
-    res := xs :: res
-  return res.reverse
-
-#guard (Iter.make Slice.all 5).toList == [0, 1, 2, 3, 4]
-#guard (Iter.make (make! .none .none (.some 2)) 5).toList == [0, 2, 4]
-#guard (Iter.make (make! (.some 3) .none .none) 5).toList == [3, 4]
-#guard (Iter.make (make! .none .none (.some (-1))) 5).toList == [4, 3, 2, 1, 0]
-
-private def testBreak (iter : Iter) : List Nat := Id.run do
-  let mut res := []
-  for xs in iter do
-    res := xs :: res
-    break
-  return res.reverse
-
-private def testReturn (iter : Iter) : List Nat := Id.run do
-  let mut res := []
-  let mut i := 0
-  for xs in iter do
-    res := xs :: res
-    i := i + 1
-    if i == 3 then return res.reverse
-  return res.reverse
-
-#guard (Iter.make Slice.all 5).testReturn == [0, 1, 2]
-
-/- Testing code left in for debugging
-#eval do
-  let i0 := Iter.make Slice.all 3
-  let (n0, i1) <- i0.next
-  let (n1, i2) <- i1.next
-  let (n2, i3) <- i2.next
-  --let (n3, i4) <- i3.next
-  return (i0, n0, i1, n1, i2, n2, i3) -- , n3, i4)
--/
+#guard (Iter.make! Slice.all 5).toList == [0, 1, 2, 3, 4]
+#guard (Iter.make! (Slice.make! .none .none (.some 2)) 5).toList == [0, 2, 4]
+#guard (Iter.make! (Slice.make! (.some 3) .none .none) 5).toList == [3, 4]
+#guard (Iter.make! (Slice.make! .none .none (.some (-1))) 5).toList == [4, 3, 2, 1, 0]
 
 end Iter
 end Slice
