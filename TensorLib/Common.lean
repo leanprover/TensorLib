@@ -6,11 +6,20 @@ Authors: Jean-Baptiste Tristan, Paul Govereau, Sean McLaughlin
 
 import Plausible
 import Std.Tactic.BVDecide
-import TensorLib.Iterator
 
 open Plausible
 
 namespace TensorLib
+
+abbrev Err := Except String
+
+def impossible {a : Type} [h : Inhabited a] (msg : String := "") := @panic a h s!"Invariant violation: {msg}"
+
+def get! [Inhabited a] (x : Err a) : a := match x with
+| .error msg => impossible msg
+| .ok x => x
+
+def natDivCeil (num denom : Nat) : Nat := (num + denom - 1) / denom
 
 private def plausibleDefaultConfig : Plausible.Configuration := {}
 /-

@@ -4,22 +4,12 @@ Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Jean-Baptiste Tristan, Paul Govereau, Sean McLaughlin
 -/
 
-import Aesop
+import TensorLib.Common
 
 /-!
 Iterators play a big role in TensorLib.
 -/
 namespace TensorLib
-
-abbrev Err := Except String
-
-def impossible {a : Type} [h : Inhabited a] (msg : String := "") := @panic a h s!"Invariant violation: {msg}"
-
-def get! [Inhabited a] (x : Err a) : a := match x with
-| .error msg => impossible msg
-| .ok x => x
-
-def natDivCeil (num denom : Nat) : Nat := (num + denom - 1) / denom
 
 /-
 An iterator that can be reset to its starting point.
