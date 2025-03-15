@@ -215,21 +215,21 @@ There are ways to try to hack the precedence, but let's just box the lists of it
 -/
 section Lists
 
--- This iterates in "little-endian" order; the left-most element increases fastest
-structure LEList (iter : Type) where
-  private mk::
-  val : List iter
-
 -- We advance both big-endian and little-endian iterators the same way
 -- TODO: Use a zipper or some other data structure so we don't need to
 -- rebuild the list from scratch on each advance.
-private def advance [inst : Iterator iter value] (iters : List iter) (acc : List iter) : Option (List iter) :=
+private def advance (inst : Iterator iter value) (iters : List iter) (acc : List iter := []) : Option (List iter) :=
   match iters with
   | [] => none
   | iter :: iters =>
     match inst.next iter with
     | .some iter => acc.reverse ++ iter :: iters
     | .none => @advance _ _ inst iters (inst.reset iter :: acc)
+
+-- This iterates in "little-endian" order; the left-most element increases fastest
+structure LEList (iter : Type) where
+  private mk::
+  val : List iter
 
 namespace LEList
 
@@ -240,21 +240,29 @@ instance instListLE [inst : Iterator iter value] : Iterator (LEList iter) (List 
   size iter := iter.val.foldl (fun acc i => acc * inst.size i) 1
   reset iter := LEList.mk $ iter.val.map inst.reset
   peek iter := iter.val.map inst.peek
-  next iter := (@advance _ _ inst iter.val []).map LEList.mk
+  next iter := (advance inst iter.val).map LEList.mk
 
 #guard
   let iter1 := NatIter.make 5
   let iter := LEList.mk [iter1]
-  instListLE.toList iter == [[0], [1], [2], [3], [4]]
+  Iterator.toList iter == [[0], [1], [2], [3], [4]]
 
 #guard
   let iter1 := NatIter.make 5
   let iter2 := NatIter.make 3
   let iter := LEList.mk [iter1, iter2]
-  instListLE.toList iter ==
+  Iterator.toList iter ==
     [[0, 0], [1, 0], [2, 0], [3, 0], [4, 0],
      [0, 1], [1, 1], [2, 1], [3, 1], [4, 1],
      [0, 2], [1, 2], [2, 2], [3, 2], [4, 2]]
+
+#guard
+  let iter1 := NatIter.make 1
+  let iter2 := NatIter.make 2
+  let iter3 := NatIter.make 3
+  let iter := LEList.mk [iter1, iter2, iter3]
+  Iterator.toList iter ==
+    [[0, 0, 0], [0, 1, 0], [0, 0, 1], [0, 1, 1], [0, 0, 2], [0, 1, 2]]
 
 end LEList
 
@@ -271,19 +279,18 @@ instance instListBE [inst : Iterator iter value] : Iterator (BEList iter) (List 
   size iter := iter.val.foldl (fun acc i => acc * inst.size i) 1
   reset iter := BEList.mk $ iter.val.map inst.reset
   peek iter := (iter.val.map inst.peek).reverse
-  next iter := (@advance _ _ inst iter.val []).map BEList.mk
+  next iter := (advance inst iter.val).map BEList.mk
 
 #guard
   let iter1 := NatIter.make 5
   let iter := BEList.make [iter1]
-  instListBE.toList iter == [[0], [1], [2], [3], [4]]
-
+  Iterator.toList iter == [[0], [1], [2], [3], [4]]
 
 #guard
   let iter1 := NatIter.make 5
   let iter2 := NatIter.make 3
   let iter := BEList.make [iter1, iter2]
-  instListBE.toList iter ==
+  Iterator.toList iter ==
     [[0, 0], [0, 1], [0, 2],
      [1, 0], [1, 1], [1, 2],
      [2, 0], [2, 1], [2, 2],
@@ -292,7 +299,5 @@ instance instListBE [inst : Iterator iter value] : Iterator (BEList iter) (List 
 
 end BEList
 end Lists
-
-
 end Iterator
 end TensorLib

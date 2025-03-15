@@ -174,8 +174,6 @@ def intIndexToDimIndex (shape : Shape) (index : List Int) : Err DimIndex := do
 #guard intIndexToDimIndex (Shape.mk [1, 2, 3]) [0, -1, -1] == (.ok [0, 1, 2])
 #guard intIndexToDimIndex (Shape.mk [1, 2, 3]) [0, 1, -2] == (.ok [0, 1, 1])
 
-def iteratorCls : Iterator (Iterator.BEList Iterator.NatIter) (List Nat) := inferInstance
-
 def belist (shape : Shape) : Iterator.BEList Iterator.NatIter :=
   Iterator.BEList.make $ shape.val.map Iterator.NatIter.make
 

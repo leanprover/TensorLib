@@ -240,7 +240,7 @@ private def byteArrayToFloat32RoundTrip (dtype : Dtype) (f : Float32) : Bool :=
 NumPy addition overflows and underflows without complaint. We will do the same.
 -/
 def add (dtype : Dtype) (x y : ByteArray) : Err ByteArray :=
-  if dtype.itemsize != x.size || dtype.itemsize != y.size then .error "add: byte size mismatch" else
+  if dtype.itemsize != x.size || dtype.itemsize != y.size then .error s!"add: byte size mismatch: {dtype} {x.size} {y.size}" else
   match dtype with
   | .bool => do
     let x := x.toNat

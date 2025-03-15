@@ -117,12 +117,9 @@ def size (x : Tensor) : Nat := x.shape.count
 --! number of bytes representing each element
 def itemsize (x : Tensor) : Nat := x.dtype.itemsize
 
---! byte-strides
-def strides (x : Tensor) : Strides := x.unitStrides.map (fun v => x.itemsize * v)
-
 --! Get the offset corresponding to a DimIndex
 def dimIndexToOffset (x : Tensor) (i : DimIndex) : Int :=
-  Shape.dimIndexToOffset x.strides i
+  Shape.dimIndexToOffset x.unitStrides i
 
 --! Get the starting byte corresponding to a DimIndex
 def dimIndexToPosition (x : Tensor) (i : DimIndex) : Nat :=
@@ -296,7 +293,7 @@ def broadcastTo (arr : Tensor) (shape : Shape) : Err Tensor :=
   | none => .error s!"Can't broadcast {arr.shape} to {shape}"
   | some shape' =>
     if shape != shape' then .error s!"Can't broadcast {arr.shape} to {shape}" else do
-    let strides <- broadcastStrides (arr.shape.val.zip arr.strides) shape
+    let strides <- broadcastStrides (arr.shape.val.zip arr.unitStrides) shape
     .ok $ Tensor.mk arr.dtype shape arr.data arr.startIndex strides
 
 def broadcastTo! (arr : Tensor) (shape : Shape) : Tensor := get! $ broadcastTo arr shape
@@ -310,7 +307,7 @@ def broadcast (arr1 : Tensor) (arr2 : Tensor) : Err (Tensor × Tensor) :=
   return (arr1, arr2)
 
 def arrayScalar (dtype : Dtype) (arr : ByteArray) : Err Tensor :=
-  if dtype.itemsize != arr.size then .error "data size mismatch" else
+  if dtype.itemsize != arr.size then .error s!"data size mismatch: {dtype} {arr.size}" else
   .ok { dtype := dtype, shape := Shape.empty, data := arr }
 
 def arrayScalarNat (dtype : Dtype) (n : Nat) : Err Tensor := do
@@ -602,7 +599,7 @@ def ofNpy (arr : Npy.Ndarray) : Err Tensor := do
 If we have a non-trivial view, we will need a copy, since strides
 and start positions are not included in the .npy file format
 -/
-private def toNpy (arr : Tensor) : Npy.Ndarray :=
+def toNpy (arr : Tensor) : Npy.Ndarray :=
   let arr := if arr.isTriviallyReshapable then arr else arr.copy
   let descr := Npy.Dtype.mk arr.dtype Npy.ByteOrder.littleEndian
   let shape := arr.shape
