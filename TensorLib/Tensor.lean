@@ -471,7 +471,7 @@ private def inferShape (t : Tree a) : List Nat := match t with
 | .node [] => impossible
 | .node (t :: ts) => (1 + ts.length) :: inferShape t
 
-private def mapM [Monad m] (f : a -> m b) (t : Tree a) : m (Tree b) :=
+def mapM [Monad m] (f : a -> m b) (t : Tree a) : m (Tree b) :=
   map1 f t
 where
   map1 f
@@ -488,7 +488,7 @@ where
     let ts' <- mapN f ts
     return t' :: ts'
 
-private def map (f : a -> Id b) (t : Tree a) : Tree b := mapM f t
+def map (f : a -> Id b) (t : Tree a) : Tree b := mapM f t
 
 private def formatRoot [Repr a] (xs : List a) : Lean.Format :=
   sbracket (joinSep (List.map repr xs) (text ", "))

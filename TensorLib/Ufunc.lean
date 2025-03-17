@@ -21,7 +21,16 @@ namespace Ufunc
 
 def DEBUG : Bool := false
 
-private def binop (x y : Tensor) (op : ByteArray -> ByteArray -> Err ByteArray) : Err Tensor :=
+def unop (x : Tensor) (op : ByteArray -> Err ByteArray) : Err Tensor := do
+  let mut arr := Tensor.empty x.dtype x.shape
+  for idx in x.shape.belist do
+    let v <- x.getDimIndex idx
+    let k <- op v
+    let arr' <- arr.setDimIndex idx k
+    arr := arr'
+  return arr
+
+def binop (x y : Tensor) (op : ByteArray -> ByteArray -> Err ByteArray) : Err Tensor :=
   if x.dtype != y.dtype then .error "Implicit type conversions are not supported" else
   match Broadcast.broadcast { left := x.shape, right := y.shape } with
   | .none => .error s!"Can't broadcast shapes: ${x.shape} {y.shape}"
@@ -210,6 +219,16 @@ private def matmul! (x y : Tensor) : Tensor := get! $ matmul x y
 section Test
 open Tensor.Format.Tree
 
+private def lshift3 (arr : ByteArray) : Err ByteArray := match arr.data with
+| #[byte] => return ByteArray.mk #[byte <<< 3]
+| _ => throw "too many bytes"
+
+#guard
+  let tp := Dtype.uint8
+  let arr1 := (Tensor.arange! tp 10).reshape! (Shape.mk [2, 5])
+  let arr2 := get! $ unop arr1 lshift3
+  let t : Format.Tree Nat := .node [.root [0, 1, 2, 3, 4], .root [5, 6, 7, 8, 9]]
+  arr2.toNatTree! == t.map fun n => n * 8
 
 /-
 # x = np.arange(10).reshape(2, 5)
