@@ -153,11 +153,27 @@ instance instInt : Iterator IntIter Int where
 
 end IntIter
 
-section Pairs
+namespace PairLockStep
 
--- This isn't used, but is a nice example.
--- Assumes the size of the two iterators is the same
-local instance instPairLockStep [inst1 : Iterator i1 v1] [inst2 : Iterator i2 v2] : Iterator (i1 × i2) (v1 × v2) where
+/-
+This is used when iterating over two iterators of the same size
+at once. This is common, for example, during assignments where
+we're indexing into one array and assigning to another; the index
+of the lookup implies a shape of the result, so we are iterating
+two iterators with the same shape but different strides.
+
+Takes the minimum of the sizes of the two iterators. It's likely
+an error if the iterators don't have the same size.
+
+The default pair instance will be the carry-adder one for now, since
+it's a more common way to combine iterators. So when you use the
+`for (i, j) in (iter1, iter2) do ...` syntax you'll need to
+
+    `import scoped Iterator.Pairs`
+
+See the "scoped instances" section in https://lean-lang.org/theorem_proving_in_lean4/type_classes.html
+-/
+scoped instance instPairLockStep [inst1 : Iterator i1 v1] [inst2 : Iterator i2 v2] : Iterator (i1 × i2) (v1 × v2) where
   size := fun (l, r) => min (inst1.size l) (inst2.size r)
   reset := fun (l, r) => (inst1.reset l, inst2.reset r)
   peek := fun (l, r) => (inst1.peek l, inst2.peek r)
@@ -170,6 +186,18 @@ local instance instPairLockStep [inst1 : Iterator i1 v1] [inst2 : Iterator i2 v2
   let iter1 := NatIter.make 5
   let iter := (iter1, iter1)
   Iterator.toList iter == [(0, 0), (1, 1), (2, 2), (3, 3), (4, 4)]
+
+private def iter2Example : Int × Int := Id.run do
+  let mut res1 := 0
+  let mut res2 := 0
+  for (i, j) in (NatIter.make 5, IntIter.make! 0 (-10) (-1)) do
+    res1 := res1 + i
+    res2 := res2 + j
+  (res1, res2)
+
+#guard iter2Example == (10, -10)
+
+end PairLockStep
 
 -- A carry-adder-style pair iterator
 instance instPairCarry [inst1 : Iterator i1 v1] [inst2 : Iterator i2 v2] : Iterator (i1 × i2) (v1 × v2) where
@@ -199,8 +227,6 @@ instance instPairCarry [inst1 : Iterator i1 v1] [inst2 : Iterator i2 v2] : Itera
     [(0, 0), (1, 0), (2, 0), (3, 0), (4, 0),
      (0, 1), (1, 1), (2, 1), (3, 1), (4, 1),
      (0, 2), (1, 2), (2, 2), (3, 2), (4, 2)]
-
-end Pairs
 
 /-
 Lists cause a problem for the `ForIn` instance. For example, when Lean sees

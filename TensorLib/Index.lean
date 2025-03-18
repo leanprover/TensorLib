@@ -163,24 +163,22 @@ is ok but
 
 wouldn't make any sense, even though the shapes (1, 3) and (2, 3) are broadcastable.
 -/
+section Assign
+open scoped Iterator.PairLockStep
+
 def assign (arr : Tensor) (index : NumpyBasic) (v : Tensor) : Err Tensor := do
   let (basic, shape) <- toBasicIter index arr.shape
   let v <- v.broadcastTo shape
-  let mut vIter := v.shape.belist
   let mut res := arr
   let aIter := belist basic
-  let aSize : Nat := Iterator.size (List Nat) aIter
-  let vSize : Nat := Iterator.size (List Nat) vIter
-  if aSize != vSize then .error s!"Iterator size mismatch: {aSize} {vSize}" else
-  for aIndex in belist basic do
-    let vIndex := Iterator.peek vIter
+  let vIter := v.shape.belist
+  if Iterator.size (List Nat) aIter != Iterator.size (List Nat) vIter then throw s!"Iterator size mismatch" else
+  for (aIndex, vIndex) in (aIter, vIter) do
     let vVal <- v.getDimIndex vIndex
     res <- res.setDimIndex aIndex vVal
-    match Iterator.next (List Nat) vIter with
-    | none => break
-    | some vIter' =>
-      vIter := vIter'
   return res
+
+end Assign
 
 def assign! (arr : Tensor) (index : NumpyBasic) (v : Tensor) : Tensor := get! $ assign arr index v
 

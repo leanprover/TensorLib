@@ -65,8 +65,7 @@ TODO:
 private def sum0 (arr : Tensor) : Err Tensor := do
   let dtype := arr.dtype
   let mut acc := dtype.zero
-  let mut iter := arr.shape.belist
-  for index in iter do
+  for index in arr.shape.belist do
     let n <- arr.getDimIndex index
     let acc' <- dtype.add acc n
     acc := acc'

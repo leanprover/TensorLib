@@ -148,6 +148,9 @@ While experimenting, I noticed the following wart in np.mgrid
 There's something weird with backward empty slices.
 I think the last one should be the same as the others, just a size-0 dimension.
 -/
+section Mgrid
+open scoped Iterator.PairLockStep
+
 def mgrid (slices : List Slice) : Err Tensor := do
   let sliceCount := slices.length
   let iters <- slices.mapM Mgrid.MgridIter.sliceToIntIter
@@ -156,28 +159,24 @@ def mgrid (slices : List Slice) : Err Tensor := do
   let slicesShape := Shape.mk slicesDims
   let dtype := Dtype.int64 -- We fix a little-endian uint64 by convention
   let mut arr := Tensor.zeros dtype shape
-  let mut mgridIter := Mgrid.MgridIter.make iters
+  let mgridIter := Mgrid.MgridIter.make iters
   let indexIter := slicesShape.belist
-  if Iterator.size (List Int) mgridIter != Iterator.size (List Nat) indexIter then .error "Invariant failure: iterator size mismatch at start"
-  for index in indexIter do
-    let values := Iterator.peek mgridIter
+  if Iterator.size (List Int) mgridIter != Iterator.size (List Nat) indexIter then throw "Invariant failure: iterator size mismatch at start"
+  for (index, values) in (indexIter, mgridIter) do
     if values.length != sliceCount then .error "Invariant failure: value length mismatch"
     for (i, v) in (List.range sliceCount).zip values do
       let value <- Dtype.int64.byteArrayOfInt v
       arr <- arr.setDimIndex (i :: index) value
-    match Iterator.next (List Int) mgridIter with
-    | .none => break
-    | .some mgridIter' => mgridIter := mgridIter'
   return arr
 
 def mgrid! (slices : List Slice) : Tensor := get! $ mgrid slices
 
+end Mgrid
 section Test
 
 open Tensor.Format
 
 private def mg (slices : List Slice) : Tree Int := (mgrid! slices).toIntTree!
-
 
 -- 0D
 #guard mg [] == .root []
