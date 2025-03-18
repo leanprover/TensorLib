@@ -27,10 +27,6 @@ private def testTensorElementBV (dtype : Dtype) : IO Bool := do
   let expected := (Tensor.arange! dtype 20).reshape! (Shape.mk [5, 4])
   return Tensor.arrayEqual expected arr
 
-#eval do
-  let b <- testTensorElementBV Dtype.uint16
-  if !b then throw (IO.userError "fail")
-
 def runAllTests : IO Bool := do
   return (<- testTensorElementBV Dtype.uint16) &&
          (<- testTensorElementBV Dtype.uint32)

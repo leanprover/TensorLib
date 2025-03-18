@@ -43,12 +43,15 @@ def dot [Add a][Mul a][Zero a] (x y : List a) : a := (x.zip y).foldl (fun acc (a
 
 section Test
 
-#eval Testable.check (cfg := cfg) (
-  ∀ (x y : Nat),
+/--
+warning: declaration uses 'sorry'
+-/
+#guard_msgs in
+example (x y : Nat) :
   let c := natDivCeil x y
   let f := x / y
-  c == f || c == (f + 1)
-)
+  c == f || c == (f + 1) := by
+  plausible (config := cfg)
 
 local instance : SampleableExt (Nat × Nat) :=
   SampleableExt.mkSelfContained do
@@ -56,11 +59,15 @@ local instance : SampleableExt (Nat × Nat) :=
     let n <- SampleableExt.interpSample Nat
     return (x * n, x)
 
-#eval Testable.check (cfg := cfg) (
-  ∀ (xy : Nat × Nat),
+/--
+warning: declaration uses 'sorry'
+-/
+#guard_msgs in
+example (xy : Nat × Nat) :
   let (x, y) := xy
-  x % y = 0 → x / y = natDivCeil x y
-)
+  x % y = 0 → x / y = natDivCeil x y := by
+  plausible (config := cfg)
+
 
 end Test
 
