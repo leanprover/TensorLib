@@ -113,7 +113,7 @@ def _root_.ByteArray.toInt (arr : ByteArray) : Int := Id.run do
 #guard (ByteArray.mk #[0, 0x80]).toInt == -32768
 #guard (ByteArray.mk #[0x80, 0]).toInt == 0x80
 
-def bitVecToByteArray (n : Nat) (v : BitVec n) : ByteArray := Id.run do
+def bitVecToLEByteArray (n : Nat) (v : BitVec n) : ByteArray := Id.run do
   let numBytes := natDivCeil n 8
   let mut arr := ByteArray.mkEmpty numBytes
   for i in [0 : numBytes] do
@@ -121,9 +121,12 @@ def bitVecToByteArray (n : Nat) (v : BitVec n) : ByteArray := Id.run do
     arr := arr.push byte
   return arr
 
-#guard (bitVecToByteArray 16 0x0100).toList == [0, 1]
-#guard (bitVecToByteArray 20 0x01000).toList == [0, 16, 0]
-#guard (bitVecToByteArray 32 0x1).toList == [1, 0, 0, 0]
+#guard (bitVecToLEByteArray 16 0x0100).toList == [0, 1]
+#guard (bitVecToLEByteArray 20 0x01000).toList == [0, 16, 0]
+#guard (bitVecToLEByteArray 32 0x1).toList == [1, 0, 0, 0]
+
+def bitVecToBEByteArray (n : Nat) (v : BitVec n) : ByteArray :=
+  (bitVecToLEByteArray n v).reverse
 
 /-!
 The strides are how many bytes you need to skip to get to the next element in that
@@ -166,7 +169,7 @@ def BV8.ofNat (i : Nat) : BV8 := i.toUInt8.toBitVec
 def _root_.UInt8.toBV8 (n : UInt8) : BV8 := BitVec.ofFin n.val
 def BV8.toUInt8 (n : BV8) : UInt8 := UInt8.ofNat n.toFin
 
-def BV8.toByteArray (x : BV8) : ByteArray := bitVecToByteArray 8 x
+def BV8.toByteArray (x : BV8) : ByteArray := bitVecToLEByteArray 8 x
 
 def _root_.ByteArray.toBV8 (x : ByteArray) (startIndex : Nat) : Err BV8 :=
   let n := startIndex
@@ -178,8 +181,7 @@ def _root_.ByteArray.toBV8 (x : ByteArray) (startIndex : Nat) : Err BV8 :=
 
 abbrev BV16 := BitVec 16
 
-def BV16.toByteArray (x : BV16) : ByteArray := bitVecToByteArray 16 x
-
+def BV16.toByteArray (x : BV16) : ByteArray := bitVecToLEByteArray 16 x
 
 def BV16.toBytes (n : BV16) : BV8 × BV8 :=
   let n0 := (n >>> 0o00 &&& 0xFF).truncate 8
@@ -217,7 +219,7 @@ def _root_.ByteArray.toBV16 (x : ByteArray) (startIndex : Nat) : Err BV16 :=
 
 abbrev BV32 := BitVec 32
 
-def BV32.toByteArray (x : BV32) : ByteArray := bitVecToByteArray 32 x
+def BV32.toByteArray (x : BV32) : ByteArray := bitVecToLEByteArray 32 x
 
 def BV32.toBytes (n : BV32) : BV8 × BV8 × BV8 × BV8 :=
   let n0 := (n >>> 0o00 &&& 0xFF).truncate 8
@@ -265,7 +267,7 @@ else .error s!"Index out of range: {n}"
 
 abbrev BV64 := BitVec 64
 
-def BV64.toByteArray (x : BV64) : ByteArray := bitVecToByteArray 64 x
+def BV64.toByteArray (x : BV64) : ByteArray := bitVecToLEByteArray 64 x
 
 def BV64.ofNat (i : Nat) : BV64 := i.toUInt64.toBitVec
 
@@ -338,49 +340,107 @@ def _root_.ByteArray.toBV64 (x : ByteArray) (startIndex : Nat) : Err BV64 :=
 The largest Nat such that it and every smaller Nat can be represented exactly in a 64-bit IEEE-754 float
 https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/MAX_SAFE_INTEGER
 
-The number is one less than 2^(mantissa size)
+The number 2^(mantissa size).
+
 https://en.wikipedia.org/wiki/Floating-point_arithmetic
 https://en.wikipedia.org/wiki/Double-precision_floating-point_format
 -/
-private def floatMantissaBits : Nat := 52
 private def float32MantissaBits : Nat := 23
+private def float64MantissaBits : Nat := 52
 -- Add 1 to the mantissa length because of the implicit leading 1
-def maxSafeNatForFloat : Nat := Nat.pow 2 (floatMantissaBits + 1) - 1
-def maxSafeNatForFloat32 : Nat := Nat.pow 2 (float32MantissaBits + 1) - 1
+def maxSafeNatForFloat32 : Nat := Nat.pow 2 (float32MantissaBits + 1)
+def maxSafeNatForFloat64 : Nat := Nat.pow 2 (float64MantissaBits + 1)
 
-def _root_.Int.toFloat (n : Int) : Float := Float.ofInt n
--- TODO: Use Flaot32.ofInt when https://github.com/leanprover/lean4/pull/7277 is merged, probably in 4.17.0
+
+-- TODO: Use Float32.ofInt when https://github.com/leanprover/lean4/pull/7277 is merged, probably in 4.18.0
 def _root_.Int.toFloat32 (n : Int) : Float32 := match n with
 | Int.ofNat n => Float32.ofNat n
 | Int.negSucc n => Float32.neg (Float32.ofNat (Nat.succ n))
+def _root_.Int.toFloat64 (n : Int) : Float := Float.ofInt n
 
-
-def _root_.Float32.toLEByteArray (f : Float32) : ByteArray := bitVecToByteArray 32 f.toBits.toBitVec
-def _root_.Float.toLEByteArray (f : Float) : ByteArray := bitVecToByteArray 64 f.toBits.toBitVec
+def _root_.Float.toLEByteArray (f : Float) : ByteArray := bitVecToLEByteArray 64 f.toBits.toBitVec
+def _root_.Float32.toLEByteArray (f : Float32) : ByteArray := bitVecToLEByteArray 32 f.toBits.toBitVec
 
 /-- Interpret a `ByteArray` of size 4 as a little-endian `UInt32`. Missing from Lean stdlib. -/
-def _root_.ByteArray.toUInt32LE! (bs : ByteArray) : UInt32 :=
-  assert! bs.size == 4
-  (bs.get! 3).toUInt32 <<< 0x18 |||
-  (bs.get! 2).toUInt32 <<< 0x10 |||
-  (bs.get! 1).toUInt32 <<< 0x8  |||
-  (bs.get! 0).toUInt32
+def _root_.ByteArray.toUInt32LE (bs : ByteArray) : Err UInt32 :=
+  if bs.size != 4 then throw "Expected size 4 byte array" else
+  return (bs.get! 3).toUInt32 <<< 0x18 |||
+         (bs.get! 2).toUInt32 <<< 0x10 |||
+         (bs.get! 1).toUInt32 <<< 0x8  |||
+         (bs.get! 0).toUInt32
+
+def _root_.ByteArray.toUInt32LE! (bs : ByteArray) : UInt32 := get! bs.toUInt32LE
+
+/--
+warning: declaration uses 'sorry'
+-/
+#guard_msgs in
+example (x : UInt32) :
+  let c := bitVecToLEByteArray 32 x.toBitVec
+  let x' := c.toUInt32LE!
+  x == x' := by
+  plausible (config := cfg)
 
 /-- Interpret a `ByteArray` of size 4 as a big-endian `UInt32`.  Missing from Lean stdlib. -/
-def _root_.ByteArray.toUInt32BE! (bs : ByteArray) : UInt32 :=
-  assert! bs.size == 4
-  (bs.get! 0).toUInt32 <<< 0x38 |||
-  (bs.get! 1).toUInt32 <<< 0x30 |||
-  (bs.get! 2).toUInt32 <<< 0x28 |||
-  (bs.get! 3).toUInt32 <<< 0x20
+def _root_.ByteArray.toUInt32BE (bs : ByteArray) : Err UInt32 :=
+  if bs.size != 4 then throw "Expected size 4 byte array" else
+  return (bs.get! 0).toUInt32 <<< 0x18 |||
+         (bs.get! 1).toUInt32 <<< 0x10 |||
+         (bs.get! 2).toUInt32 <<< 0x8 |||
+         (bs.get! 3).toUInt32
 
--- Assumes arr.size == 4
-def Float32.ofLEByteArray! (arr : ByteArray) : Float32 :=
-  Float32.ofBits arr.toUInt32LE!
+def _root_.ByteArray.toUInt32BE! (bs : ByteArray) : UInt32 := get! bs.toUInt32BE
 
--- Assumes arr.size == 8
-def Float.ofLEByteArray! (arr : ByteArray) : Float :=
-  Float.ofBits arr.toUInt64LE!
+private def roundTripUInt32BE (x : UInt32) : Bool :=
+  let c := bitVecToBEByteArray 32 x.toBitVec
+  let x' := c.toUInt32BE!
+  x == x'
+
+private def roundTripUInt32LE (x : UInt32) : Bool :=
+  let c := bitVecToLEByteArray 32 x.toBitVec
+  let x' := c.toUInt32LE!
+  x == x'
+
+#guard roundTripUInt32BE 0xFFFF
+#guard roundTripUInt32BE 0x1010
+#guard roundTripUInt32LE 0xFFFF
+#guard roundTripUInt32LE 0x1010
+
+-- This plausible check does not find trivial bugs when I mess with the shifts.
+-- Leaving for posterity as the tool improves.
+/--
+warning: declaration uses 'sorry'
+-/
+#guard_msgs in
+example (x : UInt32) : roundTripUInt32BE x := by plausible (config := cfg)
+
+-- This plausible check does not find trivial bugs when I mess with the shifts.
+-- Leaving for posterity as the tool improves.
+/--
+warning: declaration uses 'sorry'
+-/
+#guard_msgs in
+example (x : UInt32) : roundTripUInt32LE x := by plausible (config := cfg)
+
+def Float32.ofLEByteArray (arr : ByteArray) : Err Float32 := do
+  let n <- arr.toUInt32LE
+  return Float32.ofBits n
+
+def Float32.ofLEByteArray! (arr : ByteArray) : Float32 := get! $ Float32.ofLEByteArray arr
+
+/- The library function has no safe version -/
+def _root_.ByteArray.toUInt64LE (bs : ByteArray) : Err UInt64 :=
+  if bs.size != 8 then throw "Expected size 8 byte array" else return bs.toUInt64LE!
+
+/- The library function has no safe version -/
+def _root_.ByteArray.toUInt64BE (bs : ByteArray) : Err UInt64 :=
+  if bs.size != 8 then throw "Expected size 8 byte array" else return bs.toUInt64BE!
+
+def Float.ofLEByteArray (arr : ByteArray) : Err Float := do
+  let n <- arr.toUInt64LE
+  return Float.ofBits n
+
+def Float.ofLEByteArray! (arr : ByteArray) : Float := get! $ Float.ofLEByteArray arr
 
 def _root_.Float32.toNat (f : Float32) : Nat := f.toUInt64.toNat
 
@@ -390,7 +450,7 @@ def _root_.Float32.toInt (f : Float32) : Int :=
   let n := Int.ofNat f.toUInt64.toNat
   if neg then -n else n
 
-def _root_.Float.toNat (f : Float) : Nat := f.toUInt32.toNat
+def _root_.Float.toNat (f : Float) : Nat := f.toUInt64.toNat
 
 def _root_.Float.toInt (f : Float) : Int :=
   let neg := f <= 0
@@ -404,5 +464,16 @@ def _root_.Float.toInt (f : Float) : Int :=
     let arr := n.toByteArray
     let n' <- ByteArray.toBV64 arr 0
     return n == n') == .ok true
+
+-- Tests showing that the last number we can represent is maxSafeNatForFloat{32,64}
+#guard
+  let n := maxSafeNatForFloat32 + 1
+  let f := n.toFloat32
+  f.toFloat.toNat == n - 1
+
+#guard
+  let n := maxSafeNatForFloat64 + 1
+  let f := n.toFloat
+  f.toNat == n - 1
 
 end TensorLib

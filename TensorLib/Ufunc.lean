@@ -56,6 +56,9 @@ def sub! (x y : Tensor) : Tensor := get! $ sub x y
 def mul! (x y : Tensor) : Tensor := get! $ mul x y
 def div! (x y : Tensor) : Tensor := get! $ div x y
 
+def abs (x : Tensor) : Err Tensor := unop x x.dtype.abs
+def abs! (x : Tensor) : Tensor := get! $ abs x
+
 /-
 TODO:
 - np.sum. Prove that np.sum(x, axis=(2, 4, 6)) == np.sum(np.sum(np.sum(x, axis=6), axis=4), axis=2) # and other variations
@@ -324,6 +327,14 @@ array([[ 60,  70],
   let t1 := Tensor.ofNatList! Dtype.uint8 [0, 0xFF, 0xFE, 0xFD, 0xFC, 0xFB]
   let t1 := t1.astype! Dtype.int8
   let t1 := t1.reshape! shape
+  Tensor.arrayEqual t t1
+
+#guard
+  let shape := Shape.mk [2, 3]
+  let t := (arange! Dtype.int8 6).reshape! shape
+  let t := t.astype! Dtype.float32
+  let t1 := mul! t (Tensor.arrayScalarFloat32! (-1.0))
+  let t1 := abs! t1
   Tensor.arrayEqual t t1
 
 /-! WIP example NKI kernel

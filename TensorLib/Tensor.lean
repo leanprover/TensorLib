@@ -322,6 +322,18 @@ def arrayScalarInt (dtype : Dtype) (n : Int) : Err Tensor := do
 
 def arrayScalarInt! (dtype : Dtype) (n : Int) : Tensor := get! $ arrayScalarInt dtype n
 
+def arrayScalarFloat32 (f : Float32) : Err Tensor :=
+  let arr := BV32.toByteArray f.toBits.toBitVec
+  arrayScalar Dtype.float32 arr
+
+def arrayScalarFloat32! (f : Float32) : Tensor := get! $ arrayScalarFloat32 f
+
+def arrayScalarFloat64 (f : Float) : Err Tensor :=
+  let arr := BV64.toByteArray f.toBits.toBitVec
+  arrayScalar Dtype.float64 arr
+
+def arrayScalarFloat64! (n : Float) : Tensor := get! $ arrayScalarFloat64 n
+
 def arange (dtype : Dtype) (n : Nat) : Err Tensor := do
   let size := dtype.itemsize
   let mut data := ByteArray.mkEmpty (n * size)
@@ -443,7 +455,7 @@ def astype (arr : Tensor) (toDtype : Dtype) : Err Tensor := do
   }
   for dimIndex in arr.shape.belist do
     let v <- arr.getDimIndex dimIndex
-    let v' := Dtype.castOverflow arr.dtype v toDtype
+    let v' <- Dtype.castOverflow arr.dtype v toDtype
     let res' <- res.setDimIndex dimIndex v'
     res := res'
   return res
@@ -554,6 +566,18 @@ def toNatTree (arr : Tensor) : Err (Format.Tree Nat) := do
   return t.map ByteArray.toNat
 
 def toNatTree! (arr : Tensor) : Format.Tree Nat := get! $ toNatTree arr
+
+def toFloat32Tree (arr : Tensor) : Err (Format.Tree Float32) := do
+  let t <- arr.toByteArrayTree
+  return t.map Float32.ofLEByteArray!
+
+def toFloat32Tree! (arr : Tensor) : Format.Tree Float32 := get! $ toFloat32Tree arr
+
+def toFloat64Tree (arr : Tensor) : Err (Format.Tree Float) := do
+  let t <- arr.toByteArrayTree
+  return t.map Float.ofLEByteArray!
+
+def toFloat64Tree! (arr : Tensor) : Format.Tree Float := get! $ toFloat64Tree arr
 
 def formatInt (arr : Tensor) : Err Std.Format := do
   let t <- arr.toIntTree

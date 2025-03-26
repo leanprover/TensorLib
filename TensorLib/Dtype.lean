@@ -3,9 +3,11 @@ Copyright (c) 2024 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Jean-Baptiste Tristan, Paul Govereau, Sean McLaughlin
 -/
-
+import Plausible
 import TensorLib.Common
 import TensorLib.Shape
+
+open Plausible(Gen SampleableExt Shrinkable)
 
 namespace TensorLib
 
@@ -24,7 +26,30 @@ inductive Dtype where
 | float64
 deriving BEq, Repr, Inhabited
 
+
 namespace Dtype
+
+instance : LawfulBEq Dtype where
+  eq_of_beq {a b} h := by cases a <;> cases b <;> first | rfl | contradiction
+  rfl {a} := by cases a <;> decide
+
+def gen : Gen Dtype := Gen.elements [
+  bool,
+  int8,
+  int16,
+  int32,
+  int64,
+  uint8,
+  uint16,
+  uint32,
+  uint64,
+  float32,
+  float64
+] (by simp)
+
+instance : Shrinkable Dtype where
+
+instance : SampleableExt Dtype := SampleableExt.mkSelfContained gen
 
 -- Should match the NumPy name of the dtype. We use toString to generate NumPy test code.
 instance : ToString Dtype where
@@ -64,6 +89,63 @@ def itemsize (x : Dtype) : Nat := match x with
 | int16 | uint16 => 2
 | bool | int8 | uint8 => 1
 
+def lossless (fromDtype toDtype : Dtype) : Bool := match fromDtype, toDtype with
+| .bool, _ => true
+| _, .bool => false
+| .int8, .int8
+| .int8, .int16
+| .int8, .int32
+| .int8, .int64
+| .int8, .float32
+| .int8, .float64 => true
+| .int8, _ => false
+| .uint8, .uint8
+| .uint8, .uint16
+| .uint8, .uint32
+| .uint8, .uint64
+| .uint8, .int16
+| .uint8, .int32
+| .uint8, .int64
+| .uint8, .float32
+| .uint8, .float64 => true
+| .uint8, _ => false
+| .int16, .int16
+| .int16, .int32
+| .int16, .int64
+| .int16, .float32
+| .int16, .float64 => true
+| .int16, _ => false
+| .uint16, .uint16
+| .uint16, .uint32
+| .uint16, .uint64
+| .uint16, .int32
+| .uint16, .int64
+| .uint16, .float32
+| .uint16, .float64 => true
+| .uint16, _ => false
+| .int32, .int32
+| .int32, .int64
+| .int32, .float64 => true
+| .int32, _ => false
+| .uint32, .uint32
+| .uint32, .uint64
+| .uint32, .float64 => true
+| .uint32, _ => false
+| .int64, .int64 => true
+| .int64, _ => false
+| .uint64, .uint64 => true
+| .uint64, _ => false
+| .float32, .float32
+| .float32, .float64 => true
+| .float32, _ => false
+| .float64, .float64 => true
+| .float64, _ => false
+
+theorem losslessAntiSymmetric (t1 t2 : Dtype) (H : lossless t1 t2) (H1 : t1 ≠ t2) : !(lossless t2 t1) := by
+  revert H
+  unfold lossless;
+  cases t1 <;> cases t2 <;> trivial
+
 /-
 In NumPy, I could not get bool coversion to crash. Any non-zero value becomes True, 0 becomes false
 
@@ -97,7 +179,7 @@ private def maxSafeNat : Dtype -> Option Nat
 | .uint64 => some 0xFFFFFFFFFFFFFFFF
 | .int64 => some 0x7FFFFFFFFFFFFFFF
 | .float32 => maxSafeNatForFloat32
-| .float64 => maxSafeNatForFloat
+| .float64 => maxSafeNatForFloat64
 
 private def canCastFromNat (dtype : Dtype) (n : Nat) : Bool := n <= dtype.maxSafeNat.getD n
 
@@ -114,7 +196,7 @@ private def minSafeInt : Dtype -> Option Int
 | .int32 => some (-0x80000000)
 | .int64 => some (-0x8000000000000000)
 | .float32 => some (-maxSafeNatForFloat32)
-| .float64 => some (-maxSafeNatForFloat)
+| .float64 => some (-maxSafeNatForFloat64)
 
 private def canCastFromInt (dtype : Dtype) (n : Int) : Bool :=
   if n < 0 then dtype.minSafeInt.getD n <= n
@@ -159,8 +241,8 @@ private def byteArrayOfIntOverflow (dtype : Dtype) (n : Int) : ByteArray := matc
 | .uint16 | .int16 => BV16.toByteArray n.toInt16.toBitVec
 | .uint32 | .int32 => BV32.toByteArray n.toInt32.toBitVec
 | .uint64 | .int64 => BV64.toByteArray n.toInt64.toBitVec
-| .float32 => n.toFloat.toLEByteArray
-| .float64 => n.toFloat.toLEByteArray
+| .float32 => n.toFloat32.toLEByteArray
+| .float64 => n.toFloat64.toLEByteArray
 
 def byteArrayOfInt (dtype : Dtype) (n : Int) : Err ByteArray :=
   if dtype.canCastFromInt n then .ok (dtype.byteArrayOfIntOverflow n)
@@ -188,7 +270,7 @@ private def byteArrayToFloat (dtype : Dtype) (arr : ByteArray) : Err Float := ma
 
 private def byteArrayToFloat! (dtype : Dtype) (arr : ByteArray) : Float := get! $ byteArrayToFloat dtype arr
 
-private def byteArrayOfFloat (dtype : Dtype) (f : Float) : Err ByteArray := match dtype with
+def byteArrayOfFloat (dtype : Dtype) (f : Float) : Err ByteArray := match dtype with
 | .float64 => .ok $ BV64.toByteArray f.toBits.toBitVec
 | _ => .error "Illegal type conversion"
 
@@ -215,9 +297,7 @@ private def byteArrayToFloatRoundTrip (dtype : Dtype) (f : Float) : Bool :=
 #guard !float32.byteArrayToFloatRoundTrip 0
 
 def byteArrayToFloat32 (dtype : Dtype) (arr : ByteArray) : Err Float32 := match dtype with
-| .float32 =>
-  if arr.size != 4 then .error "byte size mismatch" else
-  .ok $ Float32.ofBits arr.toUInt32LE!
+| .float32 => arr.toUInt32LE.map Float32.ofBits
 | _ => .error "Illegal type conversion"
 
 def byteArrayToFloat32! (dtype : Dtype) (arr : ByteArray) : Float32 :=  get! $ byteArrayToFloat32 dtype arr
@@ -317,25 +397,153 @@ This works for int/uint/bool/float. Keep an eye out when we start implementing u
 -/
 def zero (dtype : Dtype) : ByteArray := ByteArray.mk $ (List.replicate dtype.itemsize (0 : UInt8)).toArray
 
-def castOverflow (fromDtype : Dtype) (data : ByteArray) (toDtype : Dtype) : ByteArray :=
-  if fromDtype == toDtype then data else
+def abs (dtype : Dtype) (x : ByteArray) : Err ByteArray := do
+  match dtype with
+  | .uint8 | .uint16 | .uint32 | .uint64 => return x
+  | .int8 | .int16| .int32 | .int64 => return dtype.byteArrayOfIntOverflow x.toInt.natAbs
+  | .float32 =>
+    let x <- dtype.byteArrayToFloat32 x
+    dtype.byteArrayOfFloat32 x.abs
+  | .float64 => do
+    let x <- dtype.byteArrayToFloat x
+    dtype.byteArrayOfFloat x.abs
+  | .bool => return x
+
+def castOverflow (fromDtype : Dtype) (data : ByteArray) (toDtype : Dtype) : Err ByteArray :=
+  if fromDtype == toDtype then return data else
   match fromDtype, toDtype with
-  | _, .bool => ByteArray.mk #[if data.data.all fun x => x == 0 then 0 else 1]
+  | _, .bool => return ByteArray.mk #[if data.data.all fun x => x == 0 then 0 else 1]
   | .bool, _ | .uint8, _ | .uint16, _ | .uint32, _ | .uint64, _ =>
-    toDtype.byteArrayOfNatOverflow data.toNat
+    return toDtype.byteArrayOfNatOverflow data.toNat
   | .int8, _ | .int16, _ | .int32, _ | .int64, _ =>
-    toDtype.byteArrayOfIntOverflow data.toInt
-  | .float32, .uint8 | .float32, .uint16  | .float32, .uint32 | .float32, .uint64 =>
-    toDtype.byteArrayOfNatOverflow (Float32.ofLEByteArray! data).toNat
-  | .float32, .int8 | .float32, .int16  | .float32, .int32 | .float32, .int64 =>
-    toDtype.byteArrayOfIntOverflow (Float32.ofLEByteArray! data).toInt
-  | .float64, .uint8 | .float64, .uint16  | .float64, .uint32 | .float64, .uint64 =>
-    toDtype.byteArrayOfNatOverflow (Float.ofLEByteArray! data).toNat
-  | .float64, .int8 | .float64, .int16  | .float64, .int32 | .float64, .int64 =>
-    toDtype.byteArrayOfIntOverflow (Float.ofLEByteArray! data).toInt
-  | .float32, .float64 => (Float32.ofLEByteArray! data).toFloat.toLEByteArray
-  | .float64, .float32 => (Float.ofLEByteArray! data).toFloat32.toLEByteArray
+    return toDtype.byteArrayOfIntOverflow data.toInt
+  | .float32, .uint8 | .float32, .uint16  | .float32, .uint32 | .float32, .uint64 => do
+    let f <- Float32.ofLEByteArray data
+    return toDtype.byteArrayOfNatOverflow f.toNat
+  | .float32, .int8 | .float32, .int16  | .float32, .int32 | .float32, .int64 => do
+    let f <- Float32.ofLEByteArray data
+    return toDtype.byteArrayOfIntOverflow f.toInt
+  | .float64, .uint8 | .float64, .uint16  | .float64, .uint32 | .float64, .uint64 => do
+    let f <- Float.ofLEByteArray data
+    return toDtype.byteArrayOfNatOverflow f.toNat
+  | .float64, .int8 | .float64, .int16  | .float64, .int32 | .float64, .int64 => do
+    let f <- Float.ofLEByteArray data
+    return toDtype.byteArrayOfIntOverflow f.toInt
+  | .float32, .float64 => do
+    let f <- Float32.ofLEByteArray data
+    return f.toFloat.toLEByteArray
+  | .float64, .float32 => do
+    let f <- Float.ofLEByteArray data
+    return f.toFloat32.toLEByteArray
   | .float32, .float32 | .float64, .float64 => impossible
+
+section Test
+
+open Plausible
+
+private def canCastLosslessRoundTrip (fromDtype : Dtype) (data : ByteArray) (toDtype : Dtype) : Bool :=
+  let res := do
+    let x <- castOverflow fromDtype data toDtype
+    let y <- castOverflow toDtype x fromDtype
+    return data == y
+  match res with
+  | .ok b => b
+  | .error _ => false
+
+private def canCastLosslessIntRoundTrip (fromDtype : Dtype) (n : Int) (toDtype : Dtype) : Bool :=
+  let res := do
+    let n <- fromDtype.byteArrayOfInt n
+    return canCastLosslessRoundTrip fromDtype n toDtype
+  match res with
+  | .ok b => b
+  | .error _ => false
+
+#guard
+  let fromDtype := Dtype.int8
+  let toDtype := Dtype.float32
+  let n : Int := 5
+  canCastLosslessIntRoundTrip fromDtype n toDtype
+
+#guard
+  let fromDtype := Dtype.int8
+  let toDtype := Dtype.float32
+  let n : Int := -5
+  canCastLosslessIntRoundTrip fromDtype n toDtype
+
+#guard
+  let fromDtype := Dtype.int8
+  let toDtype := Dtype.float32
+  let n : Int := 0x7F
+  canCastLosslessIntRoundTrip fromDtype n toDtype
+
+#guard
+  let fromDtype := Dtype.int8
+  let toDtype := Dtype.float32
+  let n : Int := 0x80
+  !canCastLosslessIntRoundTrip fromDtype n toDtype
+
+#guard
+  let fromDtype := Dtype.uint8
+  let toDtype := Dtype.float32
+  let n : Int := 0xFF
+  canCastLosslessIntRoundTrip fromDtype n toDtype
+
+#guard
+  let fromDtype := Dtype.uint16
+  let toDtype := Dtype.float32
+  let n : Int := 0xFFFF
+  canCastLosslessIntRoundTrip fromDtype n toDtype
+
+#guard
+  let fromDtype := Dtype.uint32
+  let toDtype := Dtype.float32
+  let n : Int := maxSafeNatForFloat32
+  canCastLosslessIntRoundTrip fromDtype n toDtype
+
+#guard
+  let fromDtype := Dtype.uint32
+  let toDtype := Dtype.float64
+  let n : Int := min maxSafeNatForFloat64 0xFFFFFFFF
+  canCastLosslessIntRoundTrip fromDtype n toDtype
+
+#guard
+  let fromDtype := Dtype.uint64
+  let toDtype := Dtype.float64
+  let n : Int := maxSafeNatForFloat64
+  canCastLosslessIntRoundTrip fromDtype n toDtype
+
+-- 0 and 1 should be translatable at any dtype
+/--
+warning: declaration uses 'sorry'
+-/
+#guard_msgs in
+example (fromDtype toDtype : Dtype) (n : Nat) :
+  canCastLosslessIntRoundTrip fromDtype 0 toDtype &&
+  canCastLosslessIntRoundTrip fromDtype 1 toDtype
+  := by
+  plausible (config := cfg)
+
+-- One dtype should always go back and forth
+/--
+warning: declaration uses 'sorry'
+-/
+#guard_msgs in
+example (dtype : Dtype) (n : Nat) :
+  canCastLosslessIntRoundTrip dtype n dtype := by
+  plausible (config := cfg)
+
+-- Lossless translations should be OK
+/--
+warning: declaration uses 'sorry'
+-/
+#guard_msgs in
+example (fromDtype toDtype : Dtype) (n : Nat) :
+  if lossless fromDtype toDtype then
+    canCastLosslessIntRoundTrip fromDtype n toDtype
+  else true := by
+  plausible (config := cfg)
+
+end Test
 
 end Dtype
 end TensorLib
