@@ -462,6 +462,8 @@ def astype (arr : Tensor) (toDtype : Dtype) : Err Tensor := do
 
 def astype! (arr : Tensor) (toDtype : Dtype) : Tensor := get! $ astype arr toDtype
 
+def asFloat (arr : Tensor) : Err Tensor := arr.astype arr.dtype.floatVariant
+
 namespace Format
 open Std.Format
 

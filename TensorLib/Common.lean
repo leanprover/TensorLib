@@ -11,6 +11,8 @@ open Plausible
 
 namespace TensorLib
 
+export Function(comp)
+
 abbrev Err := Except String
 
 def impossible {a : Type} [h : Inhabited a] (msg : String := "") := @panic a h s!"Invariant violation: {msg}"

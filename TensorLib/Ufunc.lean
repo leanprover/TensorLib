@@ -218,6 +218,18 @@ def matmul (x y : Tensor) : Err Tensor := do
 
 private def matmul! (x y : Tensor) : Tensor := get! $ matmul x y
 
+private def liftFloatUnop (f : Dtype -> ByteArray -> Err ByteArray) (x : Tensor) : Err Tensor := do
+  let x <- x.asFloat
+  unop x (f x.dtype)
+
+def arctan : Tensor -> Err Tensor := liftFloatUnop Dtype.arctan
+def cos : Tensor -> Err Tensor := liftFloatUnop Dtype.cos
+def exp : Tensor -> Err Tensor := liftFloatUnop Dtype.exp
+def log : Tensor -> Err Tensor := liftFloatUnop Dtype.log
+def sin : Tensor -> Err Tensor := liftFloatUnop Dtype.sin
+def tan : Tensor -> Err Tensor := liftFloatUnop Dtype.tan
+def tanh : Tensor -> Err Tensor := liftFloatUnop Dtype.tanh
+
 section Test
 open Tensor.Format.Tree
 

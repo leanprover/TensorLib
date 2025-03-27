@@ -82,6 +82,10 @@ def isUint (x : Dtype) : Bool := match x with
 
 def isIntLike (x : Dtype) : Bool := x.isInt || x.isUint
 
+def isFloat (x : Dtype) : Bool := match x with
+| .float32 | .float64 => true
+| _ => false
+
 --! Number of bytes used by each element of the given dtype
 def itemsize (x : Dtype) : Nat := match x with
 | float64 | int64 | uint64 => 8
@@ -262,19 +266,19 @@ private def byteArrayToIntRoundTrip (dtype : Dtype) (n : Int) : Bool :=
 #guard int8.byteArrayToIntRoundTrip 127
 #guard !int8.byteArrayToIntRoundTrip 255
 
-private def byteArrayToFloat (dtype : Dtype) (arr : ByteArray) : Err Float := match dtype with
+private def byteArrayToFloat64 (dtype : Dtype) (arr : ByteArray) : Err Float := match dtype with
 | .float64 =>
   if arr.size != 8 then .error "byte size mismatch" else
   .ok $ Float.ofBits arr.toUInt64LE! -- toUInt64LE! is ok here because we already checked the size
 | _ => .error "Illegal type conversion"
 
-private def byteArrayToFloat! (dtype : Dtype) (arr : ByteArray) : Float := get! $ byteArrayToFloat dtype arr
+private def byteArrayToFloat64! (dtype : Dtype) (arr : ByteArray) : Float := get! $ byteArrayToFloat64 dtype arr
 
-def byteArrayOfFloat (dtype : Dtype) (f : Float) : Err ByteArray := match dtype with
+def byteArrayOfFloat64 (dtype : Dtype) (f : Float) : Err ByteArray := match dtype with
 | .float64 => .ok $ BV64.toByteArray f.toBits.toBitVec
 | _ => .error "Illegal type conversion"
 
-private def byteArrayOfFloat! (dtype : Dtype) (f : Float) : ByteArray := get! $ byteArrayOfFloat dtype f
+private def byteArrayOfFloat64! (dtype : Dtype) (f : Float) : ByteArray := get! $ byteArrayOfFloat64 dtype f
 
 def byteArrayOfFloat32 (dtype : Dtype) (f : Float32) : Err ByteArray := match dtype with
 | .float32 => .ok $ BV32.toByteArray f.toBits.toBitVec
@@ -282,19 +286,19 @@ def byteArrayOfFloat32 (dtype : Dtype) (f : Float32) : Err ByteArray := match dt
 
 private def byteArrayOfFloat32! (dtype : Dtype) (f : Float32) : ByteArray := get! $ byteArrayOfFloat32 dtype f
 
-private def byteArrayToFloatRoundTrip (dtype : Dtype) (f : Float) : Bool :=
+private def byteArrayToFloat64RoundTrip (dtype : Dtype) (f : Float) : Bool :=
   let res := do
-    let arr <- dtype.byteArrayOfFloat f
-    let f' <- dtype.byteArrayToFloat arr
+    let arr <- dtype.byteArrayOfFloat64 f
+    let f' <- dtype.byteArrayToFloat64 arr
     return f == f'
   res.toOption.getD false
 
-#guard float64.byteArrayToFloatRoundTrip 0
-#guard float64.byteArrayToFloatRoundTrip 0.1
-#guard float64.byteArrayToFloatRoundTrip (-0)
-#guard float64.byteArrayToFloatRoundTrip 17
-#guard float64.byteArrayToFloatRoundTrip (Float.sqrt 2)
-#guard !float32.byteArrayToFloatRoundTrip 0
+#guard float64.byteArrayToFloat64RoundTrip 0
+#guard float64.byteArrayToFloat64RoundTrip 0.1
+#guard float64.byteArrayToFloat64RoundTrip (-0)
+#guard float64.byteArrayToFloat64RoundTrip 17
+#guard float64.byteArrayToFloat64RoundTrip (Float.sqrt 2)
+#guard !float32.byteArrayToFloat64RoundTrip 0
 
 def byteArrayToFloat32 (dtype : Dtype) (arr : ByteArray) : Err Float32 := match dtype with
 | .float32 => arr.toUInt32LE.map Float32.ofBits
@@ -337,9 +341,11 @@ def add (dtype : Dtype) (x y : ByteArray) : Err ByteArray :=
     let y <- dtype.byteArrayToFloat32 y
     dtype.byteArrayOfFloat32 (x + y)
   | .float64 => do
-    let x <- dtype.byteArrayToFloat x
-    let y <- dtype.byteArrayToFloat y
-    dtype.byteArrayOfFloat (x + y)
+    let x <- dtype.byteArrayToFloat64 x
+    let y <- dtype.byteArrayToFloat64 y
+    dtype.byteArrayOfFloat64 (x + y)
+
+def add! (dtype : Dtype) (x y : ByteArray) : ByteArray := get! $ add dtype x y
 
 def sub (dtype : Dtype) (x y : ByteArray) : Err ByteArray :=
   if dtype.itemsize != x.size || dtype.itemsize != y.size then .error "sub: byte size mismatch" else
@@ -353,10 +359,12 @@ def sub (dtype : Dtype) (x y : ByteArray) : Err ByteArray :=
     let y <- dtype.byteArrayToFloat32 y
     dtype.byteArrayOfFloat32 (x - y)
   | .float64 => do
-    let x <- dtype.byteArrayToFloat x
-    let y <- dtype.byteArrayToFloat y
-    dtype.byteArrayOfFloat (x - y)
+    let x <- dtype.byteArrayToFloat64 x
+    let y <- dtype.byteArrayToFloat64 y
+    dtype.byteArrayOfFloat64 (x - y)
   | .bool => .error s!"`sub` not supported at type ${dtype}"
+
+def sub! (dtype : Dtype) (x y : ByteArray) : ByteArray := get! $ sub dtype x y
 
 def mul (dtype : Dtype) (x y : ByteArray) : Err ByteArray :=
   if dtype.itemsize != x.size || dtype.itemsize != y.size then .error "mul: byte size mismatch" else
@@ -370,10 +378,12 @@ def mul (dtype : Dtype) (x y : ByteArray) : Err ByteArray :=
     let y <- dtype.byteArrayToFloat32 y
     dtype.byteArrayOfFloat32 (x * y)
   | .float64 => do
-    let x <- dtype.byteArrayToFloat x
-    let y <- dtype.byteArrayToFloat y
-    dtype.byteArrayOfFloat (x * y)
+    let x <- dtype.byteArrayToFloat64 x
+    let y <- dtype.byteArrayToFloat64 y
+    dtype.byteArrayOfFloat64 (x * y)
   | .bool => .error s!"`mul` not supported at type ${dtype}"
+
+def mul! (dtype : Dtype) (x y : ByteArray) : ByteArray := get! $ mul dtype x y
 
 def div (dtype : Dtype) (x y : ByteArray) : Err ByteArray :=
   if dtype.itemsize != x.size || dtype.itemsize != y.size then .error "div: byte size mismatch" else
@@ -387,10 +397,12 @@ def div (dtype : Dtype) (x y : ByteArray) : Err ByteArray :=
     let y <- dtype.byteArrayToFloat32 y
     dtype.byteArrayOfFloat32 (x / y)
   | .float64 => do
-    let x <- dtype.byteArrayToFloat x
-    let y <- dtype.byteArrayToFloat y
-    dtype.byteArrayOfFloat (x / y)
+    let x <- dtype.byteArrayToFloat64 x
+    let y <- dtype.byteArrayToFloat64 y
+    dtype.byteArrayOfFloat64 (x / y)
   | .bool => .error s!"`div` not supported at type ${dtype}"
+
+def div! (dtype : Dtype) (x y : ByteArray) : ByteArray := get! $ div dtype x y
 
 /-
 This works for int/uint/bool/float. Keep an eye out when we start implementing unusual floating point types.
@@ -405,9 +417,11 @@ def abs (dtype : Dtype) (x : ByteArray) : Err ByteArray := do
     let x <- dtype.byteArrayToFloat32 x
     dtype.byteArrayOfFloat32 x.abs
   | .float64 => do
-    let x <- dtype.byteArrayToFloat x
-    dtype.byteArrayOfFloat x.abs
+    let x <- dtype.byteArrayToFloat64 x
+    dtype.byteArrayOfFloat64 x.abs
   | .bool => return x
+
+def abs! (dtype : Dtype) (x : ByteArray) : ByteArray := get! $ abs dtype x
 
 def castOverflow (fromDtype : Dtype) (data : ByteArray) (toDtype : Dtype) : Err ByteArray :=
   if fromDtype == toDtype then return data else
@@ -436,6 +450,128 @@ def castOverflow (fromDtype : Dtype) (data : ByteArray) (toDtype : Dtype) : Err 
     let f <- Float.ofLEByteArray data
     return f.toFloat32.toLEByteArray
   | .float32, .float32 | .float64, .float64 => impossible
+
+/-
+When you call real functions on int arrays, for example, NumPy converts the array to some float
+type before calling the function. This follows some rules, which we approximate here, given we don't
+have all the types available in NumPy (e.g. float16) and we may have types like bfloat that aren't
+in NumPy out of the box.
+-/
+def floatVariant (dtype : Dtype) : Dtype :=
+  if dtype.itemsize <= 1 then Dtype.float32 -- leaving this branch in because should be Dtype.float16. TODO to change
+  else if dtype.itemsize <= 2 then Dtype.float32
+  else Dtype.float64
+
+private def liftFloatUnop (f32 : Float32 -> Err Float32) (f64 : Float -> Err Float)
+                          (dtype : Dtype) (data : ByteArray) : Err ByteArray := do
+  if data.size != dtype.itemsize then throw "incorrect byte count" else
+  match dtype with
+  | .float32 => do
+    let f <- Float32.ofLEByteArray data
+    let x <- f32 f
+    return x.toLEByteArray
+  | .float64 => do
+    let f <- Float.ofLEByteArray data
+    let x <- f64 f
+    return x.toLEByteArray
+  | _ => throw "operation requires a float type"
+
+def arctan : Dtype -> ByteArray -> Err ByteArray :=
+  liftFloatUnop (comp .ok Float32.atan) (comp .ok Float.atan)
+
+def arctan! (dtype : Dtype) (data : ByteArray) : ByteArray := get! $ arctan dtype data
+
+def cos : Dtype -> ByteArray -> Err ByteArray :=
+  liftFloatUnop (comp .ok Float32.cos) (comp .ok Float.cos)
+
+def cos! (dtype : Dtype) (data : ByteArray) : ByteArray := get! $ cos dtype data
+
+def exp : Dtype -> ByteArray -> Err ByteArray :=
+  liftFloatUnop (comp .ok Float32.exp) (comp .ok Float.exp)
+
+def exp! (dtype : Dtype) (data : ByteArray) : ByteArray := get! $ exp dtype data
+
+def log : Dtype -> ByteArray -> Err ByteArray :=
+  liftFloatUnop (comp .ok Float32.log) (comp .ok Float.log)
+
+def log! (dtype : Dtype) (data : ByteArray) : ByteArray := get! $ log dtype data
+
+def sin : Dtype -> ByteArray -> Err ByteArray :=
+  liftFloatUnop (comp .ok Float32.sin) (comp .ok Float.sin)
+
+def sin! (dtype : Dtype) (data : ByteArray) : ByteArray := get! $ sin dtype data
+
+def sqrt : Dtype -> ByteArray -> Err ByteArray :=
+  liftFloatUnop (comp .ok Float32.sqrt) (comp .ok Float.sqrt)
+
+def sqrt! (dtype : Dtype) (data : ByteArray) : ByteArray := get! $ sqrt dtype data
+
+def tan : Dtype -> ByteArray -> Err ByteArray :=
+  liftFloatUnop (comp .ok Float32.tan) (comp .ok Float.tan)
+
+def tan! (dtype : Dtype) (data : ByteArray) : ByteArray := get! $ tan dtype data
+
+def tanh : Dtype -> ByteArray -> Err ByteArray :=
+  liftFloatUnop (comp .ok Float32.tanh) (comp .ok Float.tanh)
+
+def tanh! (dtype : Dtype) (data : ByteArray) : ByteArray := get! $ tanh dtype data
+
+private def closeEnough64 (x y : ByteArray) (err : Float := 0.000001) : Err Bool := do
+  let x <- Dtype.float64.byteArrayToFloat64 x
+  let y <- Dtype.float64.byteArrayToFloat64 y
+  return (x - y).abs < err
+
+private def closeEnough64! (x y : ByteArray) (err : Float := 0.000001) : Bool :=
+  get! $ closeEnough64 x y err
+
+private def closeEnough32 (x y : ByteArray) (err : Float32 := 0.000001) : Err Bool := do
+  let x <- Dtype.float32.byteArrayToFloat32 x
+  let y <- Dtype.float32.byteArrayToFloat32 y
+  return (x - y).abs < err
+
+private def closeEnough32! (x y : ByteArray) (err : Float32 := 0.000001) : Bool :=
+  get! $ closeEnough32 x y err
+
+-- tan = sin/cos is bitwise accurate at for float64 on my mac, but it failed on GH Actions.
+#guard
+  let typ := Dtype.float64
+  let n : Float := 1.1
+  let arr := n.toLEByteArray
+  let sin := typ.sin! arr
+  let cos := typ.cos! arr
+  let div := typ.div! sin cos
+  let tan := typ.tan! arr
+  closeEnough64! div tan
+
+-- The equality is not true for fp32, which loses more bits to rounding error
+-- TODO: Improve this by finding the index of the first different bit.
+#guard
+  let typ := Dtype.float32
+  let n : Float32 := 1.1
+  let arr := n.toLEByteArray
+  let sin := typ.sin! arr
+  let cos := typ.cos! arr
+  let div := typ.div! sin cos
+  let tan := typ.tan! arr
+  closeEnough32! div tan
+
+-- log (e ^ x) = x is bitwise accurate at float64, at least for the numbers we try
+#guard
+  let typ := Dtype.float64
+  let n : Float := 1.1
+  let arr := n.toLEByteArray
+  let exp := typ.exp! arr
+  let log := typ.log! exp
+  closeEnough64! log arr
+
+-- log (e ^ x) = x is also bitwise accurate at float32, at least for the numbers we try
+#guard
+  let typ := Dtype.float32
+  let n : Float32 := 1.1
+  let arr := n.toLEByteArray
+  let exp := typ.exp! arr
+  let log := typ.log! exp
+  closeEnough32! log arr
 
 section Test
 
