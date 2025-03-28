@@ -146,8 +146,7 @@ def dimIndexToOffset (strides : Strides) (index : DimIndex) : Offset := dot stri
 #guard positionToDimIndex [3, 1] 4 == [1, 1]
 #guard dimIndexToOffset [3, 1] [1, 1] == 4
 
--- In general you should use DimsIter instead of this, which is equivalent
--- to `DimsIter.toList` but I left it here because it is obviously terminating.
+-- Just for testing, turning things to lists, etc.
 def allDimIndices (shape : Shape) : List DimIndex := Id.run do
   let strides := unitStrides shape
   let count := shape.count

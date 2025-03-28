@@ -451,6 +451,73 @@ def castOverflow (fromDtype : Dtype) (data : ByteArray) (toDtype : Dtype) : Err 
     return f.toFloat32.toLEByteArray
   | .float32, .float32 | .float64, .float64 => impossible
 
+def isZero (dtype : Dtype) (x : ByteArray) : Err Bool := match dtype with
+| bool
+| int8
+| uint8
+| int16
+| uint16
+| int32
+| uint32
+| int64
+| uint64 => return x.data.all fun v => v == 0
+-- We need to worry about -0, which is not all 0s in the bit pattern.
+| float32 => do
+  let f <- Float32.ofLEByteArray x
+  return f == 0
+| float64 => do
+  let f <- Float.ofLEByteArray x
+  return f == 0
+
+def isZero! (dtype : Dtype) (x : ByteArray) : Bool := get! $ dtype.isZero x
+
+def nonZero (dtype : Dtype) (x : ByteArray) : Err Bool := (dtype.isZero x).map not
+
+def nonZero! (dtype : Dtype) (x : ByteArray) : Bool := get! $ dtype.nonZero x
+
+-- In one sense it's annoying to have an abbreviation, but it also saves some
+-- cognitive effort required to translate between numbers and bools.
+def logicalNot : Dtype -> ByteArray -> Err Bool := isZero
+
+#guard Dtype.uint64.isZero! (0 : UInt64).toLEByteArray
+#guard Dtype.uint64.isZero! (-0 : Int64).toLEByteArray
+#guard (0.0 : Float32).toLEByteArray.data.all fun x => x == 0
+#guard !(-0.0 : Float32).toLEByteArray.data.all fun x => x == 0
+#guard (0.0 : Float).toLEByteArray.data.all fun x => x == 0
+#guard !(-0.0 : Float).toLEByteArray.data.all fun x => x == 0
+#guard Dtype.float32.isZero! (-0.0 : Float32).toLEByteArray
+#guard Dtype.float64.isZero! (-0.0 : Float).toLEByteArray
+
+private def logicalBinop (f : Bool -> Bool -> Bool) (t1 : Dtype) (x1 : ByteArray) (t2 : Dtype) (x2 : ByteArray) : Err Bool := do
+  let z1 <- t1.nonZero x1
+  let z2 <- t2.nonZero x2
+  return f z1 z2
+
+def logicalAnd : Dtype -> ByteArray -> Dtype -> ByteArray -> Err Bool :=
+  logicalBinop (fun x y => x && y)
+
+def logicalAnd! (t1 : Dtype) (x1 : ByteArray) (t2 : Dtype) (x2 : ByteArray) : Bool :=
+  get! $ logicalAnd t1 x1 t2 x2
+
+def logicalOr : Dtype -> ByteArray -> Dtype -> ByteArray -> Err Bool :=
+  logicalBinop (fun x y => x || y)
+
+def logicalOr! (t1 : Dtype) (x1 : ByteArray) (t2 : Dtype) (x2 : ByteArray) : Bool :=
+  get! $ logicalOr t1 x1 t2 x2
+
+def logicalXor : Dtype -> ByteArray -> Dtype -> ByteArray -> Err Bool :=
+  logicalBinop (fun x y => xor x y)
+
+def logicalXor! (t1 : Dtype) (x1 : ByteArray) (t2 : Dtype) (x2 : ByteArray) : Bool :=
+  get! $ logicalXor t1 x1 t2 x2
+
+#guard logicalAnd! Dtype.uint8 (1:UInt8).toLEByteArray Dtype.float64 (5:Float).toLEByteArray
+#guard !logicalAnd! Dtype.uint8 (1:UInt8).toLEByteArray Dtype.float64 (-0:Float).toLEByteArray
+#guard logicalOr! Dtype.uint8 (1:UInt8).toLEByteArray Dtype.float64 (-0:Float).toLEByteArray
+#guard logicalOr! Dtype.uint8 (0:UInt8).toLEByteArray Dtype.float64 (-0.1:Float).toLEByteArray
+#guard !logicalOr! Dtype.uint8 (0:UInt8).toLEByteArray Dtype.float64 (-0.0:Float).toLEByteArray
+#guard !logicalXor! Dtype.uint8 (0:UInt8).toLEByteArray Dtype.float64 (-0.0:Float).toLEByteArray
+
 /-
 When you call real functions on int arrays, for example, NumPy converts the array to some float
 type before calling the function. This follows some rules, which we approximate here, given we don't

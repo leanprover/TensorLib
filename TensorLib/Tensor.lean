@@ -464,6 +464,12 @@ def astype! (arr : Tensor) (toDtype : Dtype) : Tensor := get! $ astype arr toDty
 
 def asFloat (arr : Tensor) : Err Tensor := arr.astype arr.dtype.floatVariant
 
+def ofBoolList (dtype : Dtype) (ns : List Bool) : Err Tensor := do
+  let t <- ofIntList dtype $ ns.map fun n => if n then 1 else 0
+  t.astype Dtype.bool
+
+def ofBoolList! (dtype : Dtype) (ns : List Bool) : Tensor := get! $ ofBoolList dtype ns
+
 namespace Format
 open Std.Format
 
@@ -580,6 +586,12 @@ def toFloat64Tree (arr : Tensor) : Err (Format.Tree Float) := do
   return t.map Float.ofLEByteArray!
 
 def toFloat64Tree! (arr : Tensor) : Format.Tree Float := get! $ toFloat64Tree arr
+
+def toBoolTree (arr : Tensor) : Err (Format.Tree Bool) := do
+  let t <- arr.toByteArrayTree
+  return t.map ByteArray.toBool
+
+def toBoolTree! (arr : Tensor) : Format.Tree Bool := get! $ toBoolTree arr
 
 def formatInt (arr : Tensor) : Err Std.Format := do
   let t <- arr.toIntTree

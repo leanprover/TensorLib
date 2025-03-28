@@ -21,8 +21,9 @@ namespace Ufunc
 
 def DEBUG : Bool := false
 
-def unop (x : Tensor) (op : ByteArray -> Err ByteArray) : Err Tensor := do
-  let mut arr := Tensor.empty x.dtype x.shape
+def unop (x : Tensor) (op : ByteArray -> Err ByteArray) (resultDtype : Option Dtype := none) : Err Tensor := do
+  let dtype := resultDtype.getD x.dtype
+  let mut arr := Tensor.empty dtype x.shape
   for idx in x.shape.belist do
     let v <- x.getDimIndex idx
     let k <- op v
@@ -30,21 +31,19 @@ def unop (x : Tensor) (op : ByteArray -> Err ByteArray) : Err Tensor := do
     arr := arr'
   return arr
 
-def binop (x y : Tensor) (op : ByteArray -> ByteArray -> Err ByteArray) : Err Tensor :=
-  if x.dtype != y.dtype then .error "Implicit type conversions are not supported" else
-  match Broadcast.broadcast { left := x.shape, right := y.shape } with
-  | .none => .error s!"Can't broadcast shapes: ${x.shape} {y.shape}"
-  | .some shape => do
-    let x <- x.broadcastTo shape
-    let y <- y.broadcastTo shape
-    let mut arr := Tensor.empty x.dtype shape
-    for idx in shape.belist do
-      let v <- x.getDimIndex idx
-      let w <- y.getDimIndex idx
-      let k <- op v w
-      let arr' <- arr.setDimIndex idx k
-      arr := arr'
-    return arr
+def binop (x y : Tensor) (op : ByteArray -> ByteArray -> Err ByteArray) (resultDtype : Option Dtype := none) : Err Tensor := do
+  if x.dtype != y.dtype && resultDtype.isNone then .error "Implicit type conversions are not supported and no result dtype given" else
+  let dtype := resultDtype.getD x.dtype
+  let (x, y) <- x.broadcast y
+  let shape := x.shape
+  let mut arr := Tensor.empty dtype shape
+  for idx in shape.belist do
+    let v <- x.getDimIndex idx
+    let w <- y.getDimIndex idx
+    let k <- op v w
+    let arr' <- arr.setDimIndex idx k
+    arr := arr'
+  return arr
 
 def add (x y : Tensor) : Err Tensor := binop x y x.dtype.add
 def sub (x y : Tensor) : Err Tensor := binop x y x.dtype.sub
@@ -230,6 +229,27 @@ def sin : Tensor -> Err Tensor := liftFloatUnop Dtype.sin
 def tan : Tensor -> Err Tensor := liftFloatUnop Dtype.tan
 def tanh : Tensor -> Err Tensor := liftFloatUnop Dtype.tanh
 
+def logicalNot (x : Tensor) : Err Tensor :=
+  unop x (resultDtype := Dtype.bool) fun arr => do
+  let b <- Dtype.logicalNot x.dtype arr
+  Dtype.bool.byteArrayOfInt (if b then 1 else 0)
+
+def logicalNot! (x : Tensor) : Tensor := get! $ logicalNot x
+
+private def liftLogicalOp (f : Dtype -> ByteArray -> Dtype -> ByteArray -> Err Bool) (x y : Tensor) : Err Tensor := do
+  binop x y (resultDtype := Dtype.bool) fun arrX arrY => do
+    let b <- f x.dtype arrX y.dtype arrY
+    Dtype.bool.byteArrayOfInt (if b then 1 else 0)
+
+def logicalAnd : Tensor -> Tensor -> Err Tensor := liftLogicalOp Dtype.logicalAnd
+def logicalAnd! (x y : Tensor) : Tensor := get! $ logicalAnd x y
+
+def logicalOr : Tensor -> Tensor -> Err Tensor := liftLogicalOp Dtype.logicalOr
+def logicalOr! (x y : Tensor) : Tensor := get! $ logicalOr x y
+
+def logicalXor : Tensor -> Tensor -> Err Tensor := liftLogicalOp Dtype.logicalXor
+def logicalXor! (x y : Tensor) : Tensor := get! $ logicalXor x y
+
 section Test
 open Tensor.Format.Tree
 
@@ -348,6 +368,18 @@ array([[ 60,  70],
   let t1 := mul! t (Tensor.arrayScalarFloat32! (-1.0))
   let t1 := abs! t1
   Tensor.arrayEqual t t1
+
+#guard
+  let t1 := (Tensor.ofIntList! Dtype.int8 [0, -1, 0, 7, -0])
+  let t2 := (Tensor.ofIntList! Dtype.int64 [0, -1, 1, 7, -0])
+  let tAnd := (Tensor.ofBoolList! Dtype.int64 [false, true, false, true, false])
+  let tOr := (Tensor.ofBoolList! Dtype.int64 [false, true, true, true, false])
+  let tXor := (Tensor.ofBoolList! Dtype.int64 [false, false, true, false, false])
+  let tNot := (Tensor.ofBoolList! Dtype.int32 [true, false, true, false, true])
+  Tensor.arrayEqual tAnd (logicalAnd! t1 t2)
+  && Tensor.arrayEqual tOr (logicalOr! t1 t2)
+  && Tensor.arrayEqual tXor (logicalXor! t1 t2)
+  && Tensor.arrayEqual tNot (logicalNot! t1)
 
 /-! WIP example NKI kernel
 """

@@ -115,6 +115,8 @@ def _root_.ByteArray.toInt (arr : ByteArray) : Int := Id.run do
 #guard (ByteArray.mk #[0, 0x80]).toInt == -32768
 #guard (ByteArray.mk #[0x80, 0]).toInt == 0x80
 
+def _root_.ByteArray.toBool (arr : ByteArray) : Bool := arr.data.any fun v => v != 0
+
 def bitVecToLEByteArray (n : Nat) (v : BitVec n) : ByteArray := Id.run do
   let numBytes := natDivCeil n 8
   let mut arr := ByteArray.mkEmpty numBytes
@@ -126,9 +128,6 @@ def bitVecToLEByteArray (n : Nat) (v : BitVec n) : ByteArray := Id.run do
 #guard (bitVecToLEByteArray 16 0x0100).toList == [0, 1]
 #guard (bitVecToLEByteArray 20 0x01000).toList == [0, 16, 0]
 #guard (bitVecToLEByteArray 32 0x1).toList == [1, 0, 0, 0]
-
-def bitVecToBEByteArray (n : Nat) (v : BitVec n) : ByteArray :=
-  (bitVecToLEByteArray n v).reverse
 
 /-!
 The strides are how many bytes you need to skip to get to the next element in that
@@ -383,38 +382,22 @@ example (x : UInt32) :
   x == x' := by
   plausible (config := cfg)
 
-/-- Interpret a `ByteArray` of size 4 as a big-endian `UInt32`.  Missing from Lean stdlib. -/
-def _root_.ByteArray.toUInt32BE (bs : ByteArray) : Err UInt32 :=
-  if bs.size != 4 then throw "Expected size 4 byte array" else
-  return (bs.get! 0).toUInt32 <<< 0x18 |||
-         (bs.get! 1).toUInt32 <<< 0x10 |||
-         (bs.get! 2).toUInt32 <<< 0x8 |||
-         (bs.get! 3).toUInt32
-
-def _root_.ByteArray.toUInt32BE! (bs : ByteArray) : UInt32 := get! bs.toUInt32BE
-
-private def roundTripUInt32BE (x : UInt32) : Bool :=
-  let c := bitVecToBEByteArray 32 x.toBitVec
-  let x' := c.toUInt32BE!
-  x == x'
+def _root_.UInt8.toLEByteArray (n : UInt8) : ByteArray := bitVecToLEByteArray 8 n.toBitVec
+def _root_.UInt16.toLEByteArray (n : UInt16) : ByteArray := bitVecToLEByteArray 16 n.toBitVec
+def _root_.UInt32.toLEByteArray (n : UInt32) : ByteArray := bitVecToLEByteArray 32 n.toBitVec
+def _root_.UInt64.toLEByteArray (n : UInt64) : ByteArray := bitVecToLEByteArray 64 n.toBitVec
+def _root_.Int8.toLEByteArray (n : Int8) : ByteArray := bitVecToLEByteArray 8 n.toBitVec
+def _root_.Int16.toLEByteArray (n : Int16) : ByteArray := bitVecToLEByteArray 16 n.toBitVec
+def _root_.Int32.toLEByteArray (n : Int32) : ByteArray := bitVecToLEByteArray 32 n.toBitVec
+def _root_.Int64.toLEByteArray (n : Int64) : ByteArray := bitVecToLEByteArray 64 n.toBitVec
 
 private def roundTripUInt32LE (x : UInt32) : Bool :=
   let c := bitVecToLEByteArray 32 x.toBitVec
   let x' := c.toUInt32LE!
   x == x'
 
-#guard roundTripUInt32BE 0xFFFF
-#guard roundTripUInt32BE 0x1010
 #guard roundTripUInt32LE 0xFFFF
 #guard roundTripUInt32LE 0x1010
-
--- This plausible check does not find trivial bugs when I mess with the shifts.
--- Leaving for posterity as the tool improves.
-/--
-warning: declaration uses 'sorry'
--/
-#guard_msgs in
-example (x : UInt32) : roundTripUInt32BE x := by plausible (config := cfg)
 
 -- This plausible check does not find trivial bugs when I mess with the shifts.
 -- Leaving for posterity as the tool improves.
@@ -433,10 +416,6 @@ def Float32.ofLEByteArray! (arr : ByteArray) : Float32 := get! $ Float32.ofLEByt
 /- The library function has no safe version -/
 def _root_.ByteArray.toUInt64LE (bs : ByteArray) : Err UInt64 :=
   if bs.size != 8 then throw "Expected size 8 byte array" else return bs.toUInt64LE!
-
-/- The library function has no safe version -/
-def _root_.ByteArray.toUInt64BE (bs : ByteArray) : Err UInt64 :=
-  if bs.size != 8 then throw "Expected size 8 byte array" else return bs.toUInt64BE!
 
 def Float.ofLEByteArray (arr : ByteArray) : Err Float := do
   let n <- arr.toUInt64LE
