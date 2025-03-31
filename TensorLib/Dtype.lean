@@ -583,6 +583,30 @@ def tanh : Dtype -> ByteArray -> Err ByteArray :=
 
 def tanh! (dtype : Dtype) (data : ByteArray) : ByteArray := get! $ tanh dtype data
 
+private def shift (f : UInt64 -> UInt64 -> UInt64) (dtype : Dtype) (bits : ByteArray) (shiftAmount : ByteArray) : Err ByteArray := match dtype with
+| .float32 | .float64 => throw "shifts not supported at float type"
+| .bool => throw "In NumPy, bool shifts are cast to int64. This seems arbitrary so please cast (e.g. with astype) before you shift."
+| .uint64 | .int64 | .uint32 | .int32 | .uint16 | .int16 | .uint8 | .int8 =>
+  let k := dtype.itemsize
+  if bits.size != k then throw "dtype size mismatch" else
+  let n64 := bits.toNat.toUInt64
+  let shift64 := shiftAmount.toNat.toUInt64
+  let n64 := f n64 shift64
+  return n64.toLEByteArray.take k
+
+def leftShift : Dtype -> ByteArray -> ByteArray -> Err ByteArray :=
+  shift UInt64.shiftLeft
+
+def leftShift! (dtype : Dtype) (bits : ByteArray) (shiftAmount : ByteArray) : ByteArray :=
+  get! $ leftShift dtype bits shiftAmount
+
+-- logical shift, no 1-extension
+def rightShift : Dtype -> ByteArray -> ByteArray -> Err ByteArray :=
+  shift UInt64.shiftRight
+
+def rightShift! (dtype : Dtype) (bits : ByteArray) (shiftAmount : ByteArray) : ByteArray :=
+  get! $ rightShift dtype bits shiftAmount
+
 private def closeEnough64 (x y : ByteArray) (err : Float := 0.000001) : Err Bool := do
   let x <- Dtype.float64.byteArrayToFloat64 x
   let y <- Dtype.float64.byteArrayToFloat64 y
@@ -745,6 +769,20 @@ example (fromDtype toDtype : Dtype) (n : Nat) :
     canCastLosslessIntRoundTrip fromDtype n toDtype
   else true := by
   plausible (config := cfg)
+
+#guard Dtype.uint8.leftShift! (ByteArray.mk #[10]) (ByteArray.mk #[1]) == ByteArray.mk #[20]
+#guard Dtype.int8.leftShift! (ByteArray.mk #[10]) (ByteArray.mk #[1]) == ByteArray.mk #[20]
+#guard Dtype.uint16.leftShift! (ByteArray.mk #[10, 0]) (ByteArray.mk #[1]) == ByteArray.mk #[20, 0]
+#guard Dtype.int16.leftShift! (ByteArray.mk #[10, 0]) (ByteArray.mk #[1]) == ByteArray.mk #[20, 0]
+#guard Dtype.uint32.leftShift! (ByteArray.mk #[10, 0, 0, 0]) (ByteArray.mk #[1]) == ByteArray.mk #[20, 0, 0, 0]
+#guard Dtype.int32.leftShift! (ByteArray.mk #[10, 0, 0, 0]) (ByteArray.mk #[1]) == ByteArray.mk #[20, 0, 0, 0]
+#guard Dtype.uint64.leftShift! (ByteArray.mk #[10, 0, 0, 0, 0, 0, 0, 0]) (ByteArray.mk #[1]) == ByteArray.mk #[20, 0, 0, 0, 0, 0, 0, 0]
+#guard Dtype.int64.leftShift! (ByteArray.mk #[10, 0, 0, 0, 0, 0, 0, 0]) (ByteArray.mk #[1]) == ByteArray.mk #[20, 0, 0, 0, 0, 0, 0, 0]
+#guard Dtype.int8.leftShift! (ByteArray.mk #[0xFF]) (ByteArray.mk #[1]) == ByteArray.mk #[0xFE]
+#guard !(Dtype.bool.leftShift (ByteArray.mk #[0x1]) (ByteArray.mk #[1])).isOk
+#guard !(Dtype.uint16.leftShift (ByteArray.mk #[0x1]) (ByteArray.mk #[1])).isOk
+#guard !(Dtype.float32.leftShift (ByteArray.mk #[0x1, 0, 0, 0]) (ByteArray.mk #[1])).isOk
+#guard !(Dtype.float64.leftShift (ByteArray.mk #[0x1, 0, 0, 0, 0, 0, 0, 0]) (ByteArray.mk #[1])).isOk
 
 end Test
 

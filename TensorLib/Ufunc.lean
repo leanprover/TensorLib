@@ -250,6 +250,16 @@ def logicalOr! (x y : Tensor) : Tensor := get! $ logicalOr x y
 def logicalXor : Tensor -> Tensor -> Err Tensor := liftLogicalOp Dtype.logicalXor
 def logicalXor! (x y : Tensor) : Tensor := get! $ logicalXor x y
 
+private def liftShiftOp (f : Dtype -> ByteArray -> ByteArray -> Err ByteArray) (x y : Tensor) : Err Tensor := do
+  binop x y (resultDtype := x.dtype) fun arrX arrY => do
+    f x.dtype arrX arrY
+
+def leftShift : Tensor -> Tensor -> Err Tensor := liftShiftOp Dtype.leftShift
+def leftShift! (x y : Tensor) : Tensor := get! $ leftShift x y
+
+def rightShift : Tensor -> Tensor -> Err Tensor := liftShiftOp Dtype.rightShift
+def rightShift! (x y : Tensor) : Tensor := get! $ rightShift x y
+
 section Test
 open Tensor.Format.Tree
 
@@ -380,6 +390,16 @@ array([[ 60,  70],
   && Tensor.arrayEqual tOr (logicalOr! t1 t2)
   && Tensor.arrayEqual tXor (logicalXor! t1 t2)
   && Tensor.arrayEqual tNot (logicalNot! t1)
+
+#guard
+  let shape := Shape.mk [2, 3]
+  let t := (arange! Dtype.int8 6).reshape! shape
+  let v2 := Tensor.arrayScalar! Dtype.int8 (ByteArray.mk #[2])
+  let ts := leftShift! t v2
+  let v4 := Tensor.arrayScalar! Dtype.int8 (ByteArray.mk #[4])
+  let t4 := mul! t v4
+  let ts' := rightShift! t4 v2
+  Tensor.arrayEqual ts t4 && Tensor.arrayEqual t ts'
 
 /-! WIP example NKI kernel
 """

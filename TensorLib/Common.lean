@@ -117,6 +117,12 @@ def _root_.ByteArray.toInt (arr : ByteArray) : Int := Id.run do
 
 def _root_.ByteArray.toBool (arr : ByteArray) : Bool := arr.data.any fun v => v != 0
 
+def _root_.ByteArray.take (arr : ByteArray) (n : Nat) : ByteArray :=
+  ByteArray.mk (arr.data.take n)
+
+def _root_.ByteArray.drop (arr : ByteArray) (n : Nat) : ByteArray :=
+  ByteArray.mk (arr.data.drop n)
+
 def bitVecToLEByteArray (n : Nat) (v : BitVec n) : ByteArray := Id.run do
   let numBytes := natDivCeil n 8
   let mut arr := ByteArray.mkEmpty numBytes

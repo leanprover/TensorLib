@@ -310,6 +310,8 @@ def arrayScalar (dtype : Dtype) (arr : ByteArray) : Err Tensor :=
   if dtype.itemsize != arr.size then .error s!"data size mismatch: {dtype} {arr.size}" else
   .ok { dtype := dtype, shape := Shape.empty, data := arr }
 
+def arrayScalar! (dtype : Dtype) (arr : ByteArray) : Tensor := get! $ arrayScalar dtype arr
+
 def arrayScalarNat (dtype : Dtype) (n : Nat) : Err Tensor := do
   let arr <- dtype.byteArrayOfNat n
   arrayScalar dtype arr
