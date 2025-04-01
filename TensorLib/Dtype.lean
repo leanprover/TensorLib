@@ -93,6 +93,34 @@ def itemsize (x : Dtype) : Nat := match x with
 | int16 | uint16 => 2
 | bool | int8 | uint8 => 1
 
+-- This is the type NumPy returns when using binary operators on arrays
+-- with the given types. E.g. uint16 and int16 returns an int32.
+def join (x y : Dtype) : Option Dtype :=
+  let (x, y) := if x.itemsize <= y.itemsize then (x, y) else (y, x)
+  if x == y then x else
+  match x, y with
+  | float32, float64 => float64
+  | float32, _
+  | _, float32
+  | float64, _
+  | _, float64 => none
+  | bool, _ => y
+  | int8, uint8
+  | uint8, int8 => int16
+  | int8, _
+  | uint8, _ => y
+  | int16, uint16
+  | uint16, int16 => int32
+  | int16, _
+  | uint16, _ => y
+  | int32, uint32
+  | uint32, int32 => int64
+  | int32, _
+  | uint32, _ => y
+  | int64, _
+  | _, int64
+  | uint64, _ => none -- NumPy gives "can't safely coerce" for uint64/int64
+
 def lossless (fromDtype toDtype : Dtype) : Bool := match fromDtype, toDtype with
 | .bool, _ => true
 | _, .bool => false
@@ -606,6 +634,57 @@ def rightShift : Dtype -> ByteArray -> ByteArray -> Err ByteArray :=
 
 def rightShift! (dtype : Dtype) (bits : ByteArray) (shiftAmount : ByteArray) : ByteArray :=
   get! $ rightShift dtype bits shiftAmount
+
+section Bitwise
+
+open scoped Iterator.PairLockStep
+
+private def bitwiseBinop (f : UInt8 -> UInt8 -> UInt8) (xtyp : Dtype) (x : ByteArray) (ytyp : Dtype) (y : ByteArray) : Err ByteArray := do
+  if xtyp.isFloat || ytyp.isFloat then throw "float types do not support bitwise ops" else
+  if xtyp.itemsize != x.size || ytyp.itemsize != y.size then throw "byte size mismatch" else
+  let n := x.size
+  let m := y.size
+  let xList := x.toList
+  let yList := y.toList
+  let (xList, yList) :=
+    if n == m then (xList, yList)
+    else if n < m then (xList ++ List.replicate (n - m) 0, yList)
+    else (xList, yList ++ List.replicate (m - n) 0)
+  let mut res : List UInt8 := []
+  for (a, b) in (xList, yList) do
+    res := f a b :: res
+  return ByteArray.mk res.reverse.toArray
+
+end Bitwise
+
+def bitwiseAnd : Dtype -> ByteArray -> Dtype -> ByteArray -> Err ByteArray :=
+  bitwiseBinop UInt8.land
+
+def bitwiseAnd! (xtyp : Dtype) (x : ByteArray) (ytyp : Dtype) (y : ByteArray) : ByteArray :=
+  get! $ bitwiseAnd xtyp x ytyp y
+
+def bitwiseOr : Dtype -> ByteArray -> Dtype -> ByteArray -> Err ByteArray :=
+  bitwiseBinop UInt8.lor
+
+def bitwiseOr! (xtyp : Dtype) (x : ByteArray) (ytyp : Dtype) (y : ByteArray) : ByteArray :=
+  get! $ bitwiseOr xtyp x ytyp y
+
+def bitwiseXor : Dtype -> ByteArray -> Dtype -> ByteArray -> Err ByteArray :=
+  bitwiseBinop UInt8.xor
+
+def bitwiseXor! (xtyp : Dtype) (x : ByteArray) (ytyp : Dtype) (y : ByteArray) : ByteArray :=
+  get! $ bitwiseXor xtyp x ytyp y
+
+private def bitwiseUnop (f : UInt8 -> UInt8) (xtyp : Dtype) (x : ByteArray) : Err ByteArray := do
+  if xtyp.isFloat then throw "float types do not support bitwise ops" else
+  if xtyp.itemsize != x.size then throw "byte size mismatch" else
+  return ByteArray.mk (x.data.map f)
+
+def bitwiseNot : Dtype -> ByteArray -> Err ByteArray :=
+  bitwiseUnop UInt8.complement
+
+def bitwiseNot! (xtyp : Dtype) (x : ByteArray) : ByteArray :=
+  get! $ bitwiseNot xtyp x
 
 private def closeEnough64 (x y : ByteArray) (err : Float := 0.000001) : Err Bool := do
   let x <- Dtype.float64.byteArrayToFloat64 x

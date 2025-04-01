@@ -260,6 +260,26 @@ def leftShift! (x y : Tensor) : Tensor := get! $ leftShift x y
 def rightShift : Tensor -> Tensor -> Err Tensor := liftShiftOp Dtype.rightShift
 def rightShift! (x y : Tensor) : Tensor := get! $ rightShift x y
 
+private def liftBitwiseBinop (f : Dtype -> ByteArray -> Dtype -> ByteArray -> Err ByteArray) (x y : Tensor) : Err Tensor := do
+  let dtype := x.dtype.join y.dtype
+  binop x y (resultDtype := dtype) fun arrX arrY => do
+    f x.dtype arrX y.dtype arrY
+
+def bitwiseAnd : Tensor -> Tensor -> Err Tensor := liftBitwiseBinop Dtype.bitwiseAnd
+def bitwiseAnd! (x y : Tensor) : Tensor := get! $ bitwiseAnd x y
+
+def bitwiseOr : Tensor -> Tensor -> Err Tensor := liftBitwiseBinop Dtype.bitwiseOr
+def bitwiseOr! (x y : Tensor) : Tensor := get! $ bitwiseOr x y
+
+def bitwiseXor : Tensor -> Tensor -> Err Tensor := liftBitwiseBinop Dtype.bitwiseXor
+def bitwiseXor! (x y : Tensor) : Tensor := get! $ bitwiseXor x y
+
+private def liftBitwiseUnop (f : Dtype -> ByteArray -> Err ByteArray) (x : Tensor) : Err Tensor :=
+  unop x (f x.dtype)
+
+def bitwiseNot : Tensor -> Err Tensor := liftBitwiseUnop Dtype.bitwiseNot
+def bitwiseNot! (x : Tensor) : Tensor := get! $ bitwiseNot x
+
 section Test
 open Tensor.Format.Tree
 
@@ -400,6 +420,22 @@ array([[ 60,  70],
   let t4 := mul! t v4
   let ts' := rightShift! t4 v2
   Tensor.arrayEqual ts t4 && Tensor.arrayEqual t ts'
+
+#guard
+  let shape := Shape.mk [2, 3]
+  let t := (arange! Dtype.int8 6).reshape! shape
+  let t := bitwiseNot! t
+  let t' := (Tensor.ofIntList! Dtype.int8 [-1, -2, -3, -4, -5, -6]).reshape! shape
+  Tensor.arrayEqual t t'
+
+#guard
+  let shape := Shape.mk [2, 3]
+  let s := (arange! Dtype.int8 6).reshape! shape
+  let t := Tensor.arrayScalarInt! Dtype.int8 (-1)
+  let r := bitwiseAnd! s t
+  let w := bitwiseOr! s t
+  Tensor.arrayEqual s r && Tensor.arrayEqual w (t.broadcastTo! shape)
+
 
 /-! WIP example NKI kernel
 """

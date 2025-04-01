@@ -169,7 +169,7 @@ The default pair instance will be the carry-adder one for now, since
 it's a more common way to combine iterators. So when you use the
 `for (i, j) in (iter1, iter2) do ...` syntax you'll need to
 
-    `import scoped Iterator.Pairs`
+    `open scoped Iterator.PairLockStep`
 
 See the "scoped instances" section in https://lean-lang.org/theorem_proving_in_lean4/type_classes.html
 -/
