@@ -452,7 +452,7 @@ private partial def sliceList! [Inhabited a] (s : Slice) (xs : List a) : List a 
   let rec loop (acc : List a) (i : Int) : List a :=
     if done i then acc.reverse else
     -- TODO: prove indexing is in bounds
-    loop (xs.get! i.toNat :: acc) (i + step)
+    loop (xs[i.toNat]! :: acc) (i + step)
   loop [] start
 
 #guard (make! .none .none .none).sliceList! [0, 1, 2, 3, 4] == [0, 1, 2, 3, 4]

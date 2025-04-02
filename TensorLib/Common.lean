@@ -173,7 +173,7 @@ abbrev BV8 := BitVec 8
 def BV8.ofNat (i : Nat) : BV8 := i.toUInt8.toBitVec
 
 -- `_root_` is required to add dot methods to UInt8, which is outside TensorLib
-def _root_.UInt8.toBV8 (n : UInt8) : BV8 := BitVec.ofFin n.val
+def _root_.UInt8.toBV8 (n : UInt8) : BV8 := n.toFin
 def BV8.toUInt8 (n : BV8) : UInt8 := UInt8.ofNat n.toFin
 
 def BV8.toByteArray (x : BV8) : ByteArray := bitVecToLEByteArray 8 x
@@ -358,11 +358,7 @@ private def float64MantissaBits : Nat := 52
 def maxSafeNatForFloat32 : Nat := Nat.pow 2 (float32MantissaBits + 1)
 def maxSafeNatForFloat64 : Nat := Nat.pow 2 (float64MantissaBits + 1)
 
-
--- TODO: Use Float32.ofInt when https://github.com/leanprover/lean4/pull/7277 is merged, probably in 4.18.0
-def _root_.Int.toFloat32 (n : Int) : Float32 := match n with
-| Int.ofNat n => Float32.ofNat n
-| Int.negSucc n => Float32.neg (Float32.ofNat (Nat.succ n))
+def _root_.Int.toFloat32 (n : Int) : Float32 := Float32.ofInt n
 def _root_.Int.toFloat64 (n : Int) : Float := Float.ofInt n
 
 def _root_.Float.toLEByteArray (f : Float) : ByteArray := bitVecToLEByteArray 64 f.toBits.toBitVec
