@@ -1,0 +1,16 @@
+#!/bin/bash
+set -e -u -o pipefail
+trap "kill 0" SIGINT SIGTERM
+
+ROOT=$(dirname $(dirname $(readlink -f $0)))
+
+cd $ROOT
+DOT_FILE=/tmp/tensorlib-graph.dot
+PDF_FILE=/tmp/tensorlib-graph.pdf
+lake exe graph $DOT_FILE
+echo "Wrote DOT file to $DOT_FILE"
+dot -Tpdf $DOT_FILE -o $PDF_FILE
+echo "Wrote PDF to $PDF_FILE"
+if [[ $(uname) == 'Darwin' ]]; then
+  open $PDF_FILE
+fi

@@ -19,3 +19,6 @@ require plausible from git
 
 require Cli from git
   "https://github.com/leanprover/lean4-cli.git" @ "v4.18.0"
+
+require importGraph from git
+  "https://github.com/leanprover-community/import-graph.git" @ "v4.18.0"
