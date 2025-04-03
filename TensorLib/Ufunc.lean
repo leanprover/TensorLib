@@ -17,6 +17,34 @@ Universal functions: https://numpy.org/doc/stable/reference/ufuncs.html
 
 namespace TensorLib
 namespace Tensor
+
+def full (dtype : Dtype) (shape : Shape) (arr : ByteArray) : Err Tensor := do
+  if dtype.itemsize != arr.size then throw "byte size mismatch" else
+  let mut res := zeros dtype shape
+  for index in shape.belist do
+    res <- res.setDimIndex index arr
+  return res
+
+def full! (dtype : Dtype) (shape : Shape) (arr : ByteArray) : Tensor := get! $ full dtype shape arr
+
+#guard
+  let five := (ByteArray.mk #[5])
+  (full! Dtype.uint8 (Shape.mk [2, 2]) five).getDimIndex! [0, 1] == five
+
+#guard
+  let mone := (ByteArray.mk #[0xFF])
+  (full! Dtype.int8 (Shape.mk [2, 2]) mone).getDimIndex! [0, 1] == mone
+
+-- 1 never overflows at any dtype
+def ones (dtype : Dtype) (shape : Shape) : Err Tensor := full dtype shape (dtype.byteArrayOfNatOverflow 1)
+
+def ones! (dtype : Dtype) (shape : Shape) : Tensor := get! $ ones dtype shape
+
+#guard (ones! Dtype.bool $ Shape.mk [2, 2]).nbytes == 2 * 2
+#guard (ones! Dtype.bool $ Shape.mk [2, 2]).data.data.all fun x => x = 1
+#guard (ones! Dtype.float64 $ Shape.mk [2, 2]).nbytes == 2 * 2 * 8
+#guard (ones! Dtype.float32 $ Shape.mk [2, 2]).data.toList.take 4 == [0, 0, 0x80, 0x3f] --.count 1
+
 namespace Ufunc
 
 def DEBUG : Bool := false

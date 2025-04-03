@@ -99,15 +99,6 @@ def zeros (dtype : Dtype) (shape : Shape) : Tensor := Id.run do
     data := data.push 0
   { dtype := dtype, shape := shape, data := data }
 
-def ones (dtype : Dtype) (shape : Shape) : Tensor := Id.run do
-  let size := dtype.itemsize * shape.count
-  let itemsize := dtype.itemsize
-  let mut data := ByteArray.mkEmpty size
-  for i in [0:size] do
-    let byte := if i.mod itemsize == 0 then 1 else 0
-    data := data.push byte
-  { dtype := dtype, shape := shape, data := data }
-
 --! number of dimensions
 def ndim (x : Tensor) : Nat := x.shape.ndim
 
@@ -664,8 +655,6 @@ open TensorLib.Tensor.Format.Tree
 
 #guard (zeros Dtype.float64 $ Shape.mk [2, 2]).nbytes == 2 * 2 * 8
 #guard (zeros Dtype.float64 $ Shape.mk [2, 2]).data.toList.count 0 == 2 * 2 * 8
-#guard (ones Dtype.float64 $ Shape.mk [2, 2]).nbytes == 2 * 2 * 8
-#guard (ones Dtype.float64 $ Shape.mk [2, 2]).data.toList.count 1 == 2 * 2
 
 #guard
   let t1 := (arange! Dtype.uint8 6).reshape! (Shape.mk [2, 3])
