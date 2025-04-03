@@ -236,7 +236,7 @@ private def canCastFromInt (dtype : Dtype) (n : Int) : Bool :=
 
 def sizedStrides (dtype : Dtype) (s : Shape) : Strides := List.map (fun x => x * dtype.itemsize) s.unitStrides
 
-private def byteArrayOfNatOverflow (dtype : Dtype) (n : Nat) : ByteArray := match dtype with
+def byteArrayOfNatOverflow (dtype : Dtype) (n : Nat) : ByteArray := match dtype with
 | .bool => (BV8.ofNat $ if n == 0 then 0 else 1).toByteArray
 | .uint8 => (BV8.ofNat n).toByteArray
 | .int8 => [(Int8.ofNat n).toUInt8].toByteArray

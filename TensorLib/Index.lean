@@ -7,7 +7,6 @@ Authors: Jean-Baptiste Tristan, Paul Govereau, Sean McLaughlin
 import TensorLib.Broadcast
 import TensorLib.Common
 import TensorLib.Dtype
-import TensorLib.Npy
 import TensorLib.Shape
 import TensorLib.Slice
 import TensorLib.Tensor
