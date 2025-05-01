@@ -4,9 +4,7 @@ Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Jean-Baptiste Tristan, Paul Govereau, Sean McLaughlin
 -/
 
-import Plausible
 import TensorLib.Common
-import Std.Tactic.BVDecide
 
 namespace TensorLib
 
@@ -15,41 +13,25 @@ namespace TensorLib
 -- have conversions back and forth between LE ByteArrays and UIntX.
 def _root_.UInt8.toLEByteArray (n : UInt8) : ByteArray := ByteArray.mk #[n]
 
-
--- TODO: Prove that (n &&& 0xFF).toUInt8 == n.toUInt8
-section Test
-
-/--
-info: Unable to find a counter-example
----
-warning: declaration uses 'sorry'
--/
-#guard_msgs in
-example (x : UInt16) :
-  x.toUInt8 == (x &&& 0xFF).toUInt8 ∧
-  (x >>> 8).toUInt8 == (x >>> 8 &&& 0xFF).toUInt8
-  := by plausible
-end Test
-
 def _root_.UInt16.toLEByteArray (n : UInt16) : ByteArray :=
-  let b0 := (n >>> 0).toUInt8
+  let b0 := (n      ).toUInt8
   let b1 := (n >>> 8).toUInt8
   ByteArray.mk #[b0, b1]
 
 def _root_.UInt16.toLEByteArray' (n : UInt16) : ByteArray :=
-  let b0 := (n >>> 0).toUInt8
+  let b0 := (n      ).toUInt8
   let b1 := (n >>> 8).toUInt8
   ByteArray.mk #[b0, b1]
 
 def _root_.UInt32.toLEByteArray (n : UInt32) : ByteArray :=
-  let b0 := (n >>>  0).toUInt8
+  let b0 := (n       ).toUInt8
   let b1 := (n >>>  8).toUInt8
   let b2 := (n >>> 16).toUInt8
   let b3 := (n >>> 24).toUInt8
   ByteArray.mk #[b0, b1, b2, b3]
 
 def _root_.UInt64.toLEByteArray (n : UInt64) : ByteArray :=
-  let b0 := (n >>>  0).toUInt8
+  let b0 := (n       ).toUInt8
   let b1 := (n >>>  8).toUInt8
   let b2 := (n >>> 16).toUInt8
   let b3 := (n >>> 24).toUInt8

@@ -4,8 +4,10 @@ Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Jean-Baptiste Tristan, Paul Govereau, Sean McLaughlin
 -/
 import Plausible
+import TensorLib.ByteArray
 import TensorLib.Bytes
 import TensorLib.Common
+import TensorLib.Float
 import TensorLib.Shape
 
 open Plausible(Gen SampleableExt Shrinkable)

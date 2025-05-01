@@ -5,9 +5,11 @@ Authors: Jean-Baptiste Tristan, Paul Govereau, Sean McLaughlin
 -/
 
 import TensorLib.Broadcast
+import TensorLib.ByteArray
 import TensorLib.Bytes
 import TensorLib.Common
 import TensorLib.Dtype
+import TensorLib.Float
 import TensorLib.Index
 import TensorLib.Iterator
 import TensorLib.Mgrid
