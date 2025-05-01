@@ -77,7 +77,7 @@ structure Tensor where
   data : ByteArray
   startIndex : Nat := 0 -- Pointer to the first byte of ndarray data. This is implicit in the `data` pointer in numpy.
   unitStrides : Strides := shape.unitStrides
-  deriving Repr, Inhabited
+  deriving Repr, Inhabited, BEq
 
 namespace Tensor
 
