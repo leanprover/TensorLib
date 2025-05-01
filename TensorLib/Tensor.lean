@@ -89,12 +89,12 @@ def isTriviallyReshapable (arr : Tensor) : Bool :=
   && arr.unitStrides == arr.shape.unitStrides
 
 def empty (dtype : Dtype) (shape : Shape) : Tensor :=
-  let data := ByteArray.mkEmpty (dtype.itemsize * shape.count)
+  let data := ByteArray.emptyWithCapacity (dtype.itemsize * shape.count)
   { dtype := dtype, shape := shape, data := data }
 
 def zeros (dtype : Dtype) (shape : Shape) : Tensor := Id.run do
   let size := dtype.itemsize * shape.count
-  let mut data := ByteArray.mkEmpty size
+  let mut data := ByteArray.emptyWithCapacity size
   for _ in [0:size] do
     data := data.push 0
   { dtype := dtype, shape := shape, data := data }
@@ -152,7 +152,7 @@ non-contiguous data.
 -/
 def copy (arr : Tensor) : Tensor := Id.run do
   let itemsize := arr.dtype.itemsize
-  let mut data := ByteArray.mkEmpty arr.nbytes
+  let mut data := ByteArray.emptyWithCapacity arr.nbytes
   for dimIndex in arr.shape.belist do
     let posn := arr.dimIndexToPosition dimIndex
     for j in [0:itemsize] do
@@ -325,7 +325,7 @@ def arrayScalarFloat64! (n : Float) : Tensor := get! $ arrayScalarFloat64 n
 
 def arange (dtype : Dtype) (n : Nat) : Err Tensor := do
   let size := dtype.itemsize
-  let mut data := ByteArray.mkEmpty (n * size)
+  let mut data := ByteArray.emptyWithCapacity (n * size)
   for i in [0:n] do
     let bytes <- dtype.byteArrayOfNat i
     data := ByteArray.copySlice bytes 0 data (i * size) size
@@ -335,7 +335,7 @@ def arange! (dtype : Dtype) (n : Nat) : Tensor := get! $ arange dtype n
 
 -- This is a blind index into the array, disregarding the shape.
 def getPosition (arr : Tensor) (position : Nat) : ByteArray :=
-  arr.data.copySlice (position * arr.itemsize) (ByteArray.mkEmpty arr.itemsize) 0 arr.itemsize
+  arr.data.copySlice (position * arr.itemsize) (ByteArray.emptyWithCapacity arr.itemsize) 0 arr.itemsize
 
 #guard
   let tp :=  Dtype.uint32
@@ -440,7 +440,7 @@ def astype (arr : Tensor) (toDtype : Dtype) : Err Tensor := do
   let mut res : Tensor := {
     dtype := toDtype,
     shape := arr.shape,
-    data := ByteArray.mkEmpty (arr.size * toDtype.itemsize)
+    data := ByteArray.emptyWithCapacity (arr.size * toDtype.itemsize)
   }
   for dimIndex in arr.shape.belist do
     let v <- arr.getDimIndex dimIndex
@@ -592,7 +592,7 @@ def formatNat (arr : Tensor) : Err Std.Format := do
 
 private def reverseEndianness (arr : ByteArray) (itemsize : Nat) : Err ByteArray := do
   if arr.size.mod itemsize != 0 then .error "Bytearray size mismatch" else
-  let mut res := ByteArray.mkEmpty arr.size
+  let mut res := ByteArray.emptyWithCapacity arr.size
   for i in [0:arr.size / itemsize] do
     let offset := itemsize * i
     let bytes := arr.extract offset (offset + itemsize)
@@ -601,7 +601,7 @@ private def reverseEndianness (arr : ByteArray) (itemsize : Nat) : Err ByteArray
   return res
 
 private def dataOfNpy (arr : Npy.Ndarray) : Err ByteArray := do
-  let dst := ByteArray.mkEmpty arr.nbytes
+  let dst := ByteArray.emptyWithCapacity arr.nbytes
   let copied := arr.data.copySlice arr.startIndex dst 0 arr.nbytes
   let res <- match arr.order with
   | .notApplicable

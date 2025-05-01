@@ -130,7 +130,7 @@ def apply (index : NumpyBasic) (arr : Tensor) : Err Tensor := do
   let (basic, newShape) <- toBasicIter index oldShape
   let iter := belist basic
   let iterSize := Iterator.size (List Nat) (belist basic)
-  let mut data := ByteArray.mkEmpty (iterSize * itemsize)
+  let mut data := ByteArray.emptyWithCapacity (iterSize * itemsize)
   for dimIndex in iter do
     let posn := arr.dimIndexToPosition dimIndex
     for j in [0:itemsize] do
