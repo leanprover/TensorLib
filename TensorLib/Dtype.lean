@@ -271,11 +271,11 @@ private def byteArrayToNatRoundTrip (dtype : Dtype) (n : Nat) : Bool :=
 #guard !uint8.byteArrayToNatRoundTrip 256
 
 private def byteArrayOfIntOverflow (dtype : Dtype) (n : Int) : ByteArray := match dtype with
-| .bool => (BV8.ofNat $ if n == 0 then 0 else 1).toByteArray
-| .uint8 | .int8 => [n.toInt8.toUInt8].toByteArray
-| .uint16 | .int16 => BV16.toByteArray n.toInt16.toBitVec
-| .uint32 | .int32 => BV32.toByteArray n.toInt32.toBitVec
-| .uint64 | .int64 => BV64.toByteArray n.toInt64.toBitVec
+| .bool => (UInt8.ofNat (if n == 0 then 0 else 1)).toLEByteArray
+| .uint8 | .int8 => n.toInt8.toLEByteArray
+| .uint16 | .int16 => n.toInt16.toLEByteArray
+| .uint32 | .int32 => n.toInt32.toLEByteArray
+| .uint64 | .int64 => n.toInt64.toLEByteArray
 | .float32 => n.toFloat32.toLEByteArray
 | .float64 => n.toFloat64.toLEByteArray
 
@@ -306,13 +306,13 @@ private def byteArrayToFloat64 (dtype : Dtype) (arr : ByteArray) : Err Float := 
 private def byteArrayToFloat64! (dtype : Dtype) (arr : ByteArray) : Float := get! $ byteArrayToFloat64 dtype arr
 
 def byteArrayOfFloat64 (dtype : Dtype) (f : Float) : Err ByteArray := match dtype with
-| .float64 => .ok $ BV64.toByteArray f.toBits.toBitVec
+| .float64 => .ok f.toLEByteArray
 | _ => .error "Illegal type conversion"
 
 private def byteArrayOfFloat64! (dtype : Dtype) (f : Float) : ByteArray := get! $ byteArrayOfFloat64 dtype f
 
 def byteArrayOfFloat32 (dtype : Dtype) (f : Float32) : Err ByteArray := match dtype with
-| .float32 => .ok $ BV32.toByteArray f.toBits.toBitVec
+| .float32 => .ok f.toLEByteArray
 | _ => .error "Illegal type conversion"
 
 private def byteArrayOfFloat32! (dtype : Dtype) (f : Float32) : ByteArray := get! $ byteArrayOfFloat32 dtype f
@@ -823,34 +823,37 @@ private def canCastLosslessIntRoundTrip (fromDtype : Dtype) (n : Int) (toDtype :
 
 -- 0 and 1 should be translatable at any dtype
 /--
+info: Unable to find a counter-example
+---
 warning: declaration uses 'sorry'
 -/
 #guard_msgs in
 example (fromDtype toDtype : Dtype) (n : Nat) :
   canCastLosslessIntRoundTrip fromDtype 0 toDtype &&
   canCastLosslessIntRoundTrip fromDtype 1 toDtype
-  := by
-  plausible (config := cfg)
+  := by plausible
 
+/--
+info: Unable to find a counter-example
+---
+warning: declaration uses 'sorry'
+-/
+#guard_msgs in
 -- One dtype should always go back and forth
-/--
-warning: declaration uses 'sorry'
--/
-#guard_msgs in
 example (dtype : Dtype) (n : Nat) :
-  canCastLosslessIntRoundTrip dtype n dtype := by
-  plausible (config := cfg)
+  canCastLosslessIntRoundTrip dtype n dtype := by plausible
 
--- Lossless translations should be OK
 /--
+info: Unable to find a counter-example
+---
 warning: declaration uses 'sorry'
 -/
 #guard_msgs in
+-- Lossless translations should be OK
 example (fromDtype toDtype : Dtype) (n : Nat) :
   if lossless fromDtype toDtype then
     canCastLosslessIntRoundTrip fromDtype n toDtype
-  else true := by
-  plausible (config := cfg)
+  else true := by plausible
 
 #guard Dtype.uint8.leftShift! (ByteArray.mk #[10]) (ByteArray.mk #[1]) == ByteArray.mk #[20]
 #guard Dtype.int8.leftShift! (ByteArray.mk #[10]) (ByteArray.mk #[1]) == ByteArray.mk #[20]

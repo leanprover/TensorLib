@@ -69,10 +69,10 @@ def _root_.Float.quietNaN : Float := Float.ofBits 0x7FF8000000000000
 section Test
 
 #guard (
-  let n : BV64 := 0x3FFAB851EB851EB8
+  let n : UInt64 := 0x3FFAB851EB851EB8
   do
-    let arr := n.toByteArray
-    let n' <- ByteArray.toBV64 arr 0
+    let arr := n.toLEByteArray
+    let n' <- arr.toUInt64LE
     return n == n') == .ok true
 
 -- Tests showing that the last number we can represent is maxSafeNatForFloat{32,64}

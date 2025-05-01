@@ -13,8 +13,7 @@ import TensorLib.Slice
 namespace TensorLib
 namespace Mgrid
 
---! All mgrid array elements are BV64
-abbrev elementType : Type := BV64
+abbrev elementType : Type := UInt64
 
 /-
 `mgrid` dimensions, being infinite in both directions, are sized somewhat differently
