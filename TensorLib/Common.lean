@@ -384,15 +384,6 @@ example (x : UInt32) :
   x == x' := by
   plausible (config := cfg)
 
-def _root_.UInt8.toLEByteArray (n : UInt8) : ByteArray := bitVecToLEByteArray 8 n.toBitVec
-def _root_.UInt16.toLEByteArray (n : UInt16) : ByteArray := bitVecToLEByteArray 16 n.toBitVec
-def _root_.UInt32.toLEByteArray (n : UInt32) : ByteArray := bitVecToLEByteArray 32 n.toBitVec
-def _root_.UInt64.toLEByteArray (n : UInt64) : ByteArray := bitVecToLEByteArray 64 n.toBitVec
-def _root_.Int8.toLEByteArray (n : Int8) : ByteArray := bitVecToLEByteArray 8 n.toBitVec
-def _root_.Int16.toLEByteArray (n : Int16) : ByteArray := bitVecToLEByteArray 16 n.toBitVec
-def _root_.Int32.toLEByteArray (n : Int32) : ByteArray := bitVecToLEByteArray 32 n.toBitVec
-def _root_.Int64.toLEByteArray (n : Int64) : ByteArray := bitVecToLEByteArray 64 n.toBitVec
-
 private def roundTripUInt32LE (x : UInt32) : Bool :=
   let c := bitVecToLEByteArray 32 x.toBitVec
   let x' := c.toUInt32LE!

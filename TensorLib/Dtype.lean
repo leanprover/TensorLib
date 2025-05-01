@@ -4,6 +4,7 @@ Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Jean-Baptiste Tristan, Paul Govereau, Sean McLaughlin
 -/
 import Plausible
+import TensorLib.Bytes
 import TensorLib.Common
 import TensorLib.Shape
 
@@ -237,15 +238,15 @@ private def canCastFromInt (dtype : Dtype) (n : Int) : Bool :=
 def sizedStrides (dtype : Dtype) (s : Shape) : Strides := List.map (fun x => x * dtype.itemsize) s.unitStrides
 
 def byteArrayOfNatOverflow (dtype : Dtype) (n : Nat) : ByteArray := match dtype with
-| .bool => (BV8.ofNat $ if n == 0 then 0 else 1).toByteArray
-| .uint8 => (BV8.ofNat n).toByteArray
-| .int8 => [(Int8.ofNat n).toUInt8].toByteArray
-| .uint16 => BV16.toByteArray n.toUInt16.toBitVec
-| .int16 => BV16.toByteArray n.toInt16.toBitVec
-| .uint32 => BV32.toByteArray n.toUInt32.toBitVec
-| .int32 => BV32.toByteArray n.toInt32.toBitVec
-| .uint64 => BV64.toByteArray n.toUInt64.toBitVec
-| .int64 => BV64.toByteArray n.toInt64.toBitVec
+| .bool => (if n == 0 then 0 else 1).toUInt8.toLEByteArray
+| .uint8 => n.toUInt8.toLEByteArray
+| .int8 => n.toInt8.toLEByteArray
+| .uint16 => n.toUInt16.toLEByteArray
+| .int16 => n.toInt16.toLEByteArray
+| .uint32 => n.toUInt32.toLEByteArray
+| .int32 => n.toInt32.toLEByteArray
+| .uint64 => n.toUInt64.toLEByteArray
+| .int64 => n.toInt64.toLEByteArray
 | .float32 => n.toFloat32.toLEByteArray
 | .float64 => n.toFloat.toLEByteArray
 

@@ -5,6 +5,7 @@ Authors: Jean-Baptiste Tristan, Paul Govereau, Sean McLaughlin
 -/
 
 import TensorLib.Broadcast
+import TensorLib.Bytes
 import TensorLib.Common
 import TensorLib.Dtype
 import TensorLib.Index
