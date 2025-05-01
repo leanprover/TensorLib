@@ -27,6 +27,10 @@ def _root_.ByteArray.sub (a : ByteArray) (start size : Nat) : ByteArray :=
 def _root_.ByteArray.toUInt64LE (bs : ByteArray) : Err UInt64 :=
   if bs.size != 8 then throw "Expected size 8 byte array" else return bs.toUInt64LE!
 
+/- The library function has no safe version -/
+def _root_.ByteArray.toUInt64BE (bs : ByteArray) : Err UInt64 :=
+  if bs.size != 8 then throw "Expected size 8 byte array" else return bs.toUInt64BE!
+
 /-- Interpret a `ByteArray` of size 4 as a little-endian `UInt32`. Missing from Lean stdlib. -/
 def _root_.ByteArray.toUInt32LE (bs : ByteArray) : Err UInt32 :=
   if bs.size != 4 then throw "Expected size 4 byte array" else
@@ -35,7 +39,16 @@ def _root_.ByteArray.toUInt32LE (bs : ByteArray) : Err UInt32 :=
          (bs.get! 2).toUInt32 <<< 0x10 |||
          (bs.get! 3).toUInt32 <<< 0x18
 
+/-- Interpret a `ByteArray` of size 4 as a little-endian `UInt32`. Missing from Lean stdlib. -/
+def _root_.ByteArray.toUInt32BE (bs : ByteArray) : Err UInt32 :=
+  if bs.size != 4 then throw "Expected size 4 byte array" else
+  return (bs.get! 3).toUInt32          |||
+         (bs.get! 2).toUInt32 <<< 0x8  |||
+         (bs.get! 1).toUInt32 <<< 0x10 |||
+         (bs.get! 0).toUInt32 <<< 0x18
+
 def _root_.ByteArray.toUInt32LE! (bs : ByteArray) : UInt32 := get! bs.toUInt32LE
+def _root_.ByteArray.toUInt32BE! (bs : ByteArray) : UInt32 := get! bs.toUInt32BE
 
 def _root_.ByteArray.reverse (arr : ByteArray) : ByteArray := ⟨ arr.data.reverse ⟩
 
@@ -90,9 +103,12 @@ def _root_.ByteArray.readUInt64 (arr : ByteArray) (offset : Nat) : UInt64 :=
 section Test
 
 private def roundTripUInt32LE (x : UInt32) : Bool := x.toLEByteArray.toUInt32LE! == x
+private def roundTripUInt32BE (x : UInt32) : Bool := x.toBEByteArray.toUInt32BE! == x
 
 #guard roundTripUInt32LE 0xFFFF
 #guard roundTripUInt32LE 0x1010
+#guard roundTripUInt32BE 0xFFFF
+#guard roundTripUInt32BE 0x1010
 
 /--
 info: Unable to find a counter-example
@@ -100,7 +116,7 @@ info: Unable to find a counter-example
 warning: declaration uses 'sorry'
 -/
 #guard_msgs in
-example (x : UInt32) : roundTripUInt32LE x := by plausible
+example (x : UInt32) : roundTripUInt32LE x && roundTripUInt32BE x := by plausible
 
 end Test
 
