@@ -50,6 +50,21 @@ def _root_.ByteArray.toUInt32BE (bs : ByteArray) : Err UInt32 :=
 def _root_.ByteArray.toUInt32LE! (bs : ByteArray) : UInt32 := get! bs.toUInt32LE
 def _root_.ByteArray.toUInt32BE! (bs : ByteArray) : UInt32 := get! bs.toUInt32BE
 
+/-- Interpret a `ByteArray` of size 2 as a little-endian `UInt16`. Missing from Lean stdlib. -/
+def _root_.ByteArray.toUInt16LE (bs : ByteArray) : Err UInt16 :=
+  if bs.size != 2 then throw "Expected size 2 byte array" else
+  return (bs.get! 0).toUInt16          |||
+         (bs.get! 1).toUInt16 <<< 0x8
+
+/-- Interpret a `ByteArray` of size 4 as a little-endian `UInt16`. Missing from Lean stdlib. -/
+def _root_.ByteArray.toUInt16BE (bs : ByteArray) : Err UInt16 :=
+  if bs.size != 2 then throw "Expected size 2 byte array" else
+  return (bs.get! 1).toUInt16          |||
+         (bs.get! 0).toUInt16 <<< 0x8
+
+def _root_.ByteArray.toUInt16LE! (bs : ByteArray) : UInt16 := get! bs.toUInt16LE
+def _root_.ByteArray.toUInt16BE! (bs : ByteArray) : UInt16 := get! bs.toUInt16BE
+
 def _root_.ByteArray.reverse (arr : ByteArray) : ByteArray := ⟨ arr.data.reverse ⟩
 
 def _root_.ByteArray.toNat (arr : ByteArray) : Nat := Id.run do
