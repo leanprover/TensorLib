@@ -114,7 +114,7 @@ def dimIndexToOffset (x : Tensor) (i : DimIndex) : Int :=
 
 --! Get the starting byte corresponding to a DimIndex
 def dimIndexToPosition (x : Tensor) (i : DimIndex) : Nat :=
-  (x.startIndex + (x.dimIndexToOffset i)).toNat
+  (x.startIndex + (x.itemsize * x.dimIndexToOffset i)).toNat
 
 --! number of bytes representing the entire tensor
 def nbytes (x : Tensor) : Nat := x.itemsize * x.size
@@ -638,6 +638,22 @@ def toNpy (arr : Tensor) : Npy.Ndarray :=
 section Test
 
 open TensorLib.Tensor.Format.Tree
+
+#guard
+  let e := Tensor.ofIntList! Dtype.int32 [10,20,30]
+  (e.intAtDimIndex [0], e.intAtDimIndex [1], e.intAtDimIndex [2]) ==
+    (.ok 10, .ok 20, .ok 30)
+
+#guard
+  (do
+    let e <- Tensor.ofIntList Dtype.int32 [10,20,30,40,50,60]
+    let e2 <- e.reshape (Shape.mk [2,3])
+    let a00 <- e2.intAtDimIndex [0,0]
+    let a01 <- e2.intAtDimIndex [0,1]
+    let a10 <- e2.intAtDimIndex [1,0]
+    let a12 <- e2.intAtDimIndex [1,2]
+    return (a00,a01,a10,a12)) ==
+    (.ok (10,20,40,60))
 
 #guard
   let arr := arrayScalarNat! Dtype.uint8 5
