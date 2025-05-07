@@ -12,7 +12,12 @@ export Function(comp)
 
 abbrev Err := Except String
 
-def impossible {a : Type} [h : Inhabited a] (msg : String := "") := @panic a h s!"Invariant violation: {msg}"
+instance : MonadLift Option Err where
+  monadLift
+  | .none => throw "none"
+  | .some v => return v
+
+def impossible {a : Type} [h : Inhabited a] (msg : String := "") := @panic a h s!"Impossible invariant violation: {msg}"
 
 def get! [Inhabited a] (x : Err a) : a := match x with
 | .error msg => impossible msg

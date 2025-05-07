@@ -113,7 +113,7 @@ def _root_.ByteArray.readUInt32 (arr : ByteArray) (offset : Nat) : UInt32 :=
 
 def _root_.ByteArray.readUInt64 (arr : ByteArray) (offset : Nat) : UInt64 :=
   if arr.size < offset + 8 then 0 else
-  (arr.extract offset 8).toUInt64LE!
+  (arr.sub offset 8).toUInt64LE!
 
 section Test
 
