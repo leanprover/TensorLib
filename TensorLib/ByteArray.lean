@@ -135,6 +135,39 @@ example (x : UInt32) : roundTripUInt32LE x && roundTripUInt32BE x := by plausibl
 
 end Test
 
+def _root_.ByteArray.replicate (n : Nat) (v : UInt8) : ByteArray := Id.run do
+  let mut arr := ByteArray.emptyWithCapacity n
+  for _ in [0:n] do
+    arr := arr.push v
+  arr
+
+#guard ByteArray.replicate 5 7 == ⟨ #[7, 7, 7, 7, 7] ⟩
+
+@[simp] theorem _root_.ByteArray.size_push (a : ByteArray) (b : UInt8) : (a.push b).size = a.size + 1 :=
+  Array.size_push ..
+
+private theorem _root_.ByteArray.replicateSizeAux (arr : ByteArray) (xs : List a) (v : UInt8) : (List.foldl (fun b _ => b.push v) arr xs).size = arr.size + xs.length := by
+  revert arr
+  induction xs <;> simp
+  rename_i hd tl IH
+  intros arr
+  rw [IH, ByteArray.size_push]
+  omega
+
+theorem _root_.ByteArray.replicateSize (n : Nat) : (ByteArray.replicate n v).size = n := by
+  unfold ByteArray.replicate Id.run; simp
+  rw [ByteArray.replicateSizeAux]
+  unfold ByteArray.emptyWithCapacity ByteArray.size
+  simp
+
+def _root_.ByteArray.zeros (n : Nat) : ByteArray := ByteArray.replicate n 0
+
+#guard ByteArray.zeros 5 == ⟨ #[0, 0, 0, 0, 0] ⟩
+
+theorem _root_.ByteArray.zerosSize (n : Nat) : (ByteArray.zeros n).size = n := by
+  unfold ByteArray.zeros
+  apply ByteArray.replicateSize
+
 instance : ToLEByteArray (BitVec n) where
   toLEByteArray bv := Id.run do
     let value := bv.toNat
