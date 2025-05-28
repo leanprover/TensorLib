@@ -29,10 +29,17 @@ def maxSafeNatForFloat64 : Nat := Nat.pow 2 (float64MantissaBits + 1)
 def _root_.Int.toFloat32 (n : Int) : Float32 := Float32.ofInt n
 def _root_.Int.toFloat64 (n : Int) : Float := Float.ofInt n
 
-def _root_.Float.toLEByteArray (f : Float) : ByteArray := f.toBits.toLEByteArray
-def _root_.Float.toBEByteArray (f : Float) : ByteArray := f.toBits.toBEByteArray
-def _root_.Float32.toLEByteArray (f : Float32) : ByteArray := f.toBits.toLEByteArray
-def _root_.Float32.toBEByteArray (f : Float32) : ByteArray := f.toBits.toBEByteArray
+instance : ToLEByteArray Float32 where
+  toLEByteArray f := toLEByteArray f.toBits
+
+instance : ToBEByteArray Float32 where
+  toBEByteArray f := toBEByteArray f.toBits
+
+instance : ToLEByteArray Float where
+  toLEByteArray f := toLEByteArray f.toBits
+
+instance : ToBEByteArray Float where
+  toBEByteArray f := toBEByteArray f.toBits
 
 def Float32.ofLEByteArray (arr : ByteArray) : Err Float32 := do
   return Float32.ofBits (<- arr.toUInt32LE)
@@ -81,7 +88,7 @@ section Test
 #guard (
   let n : UInt64 := 0x3FFAB851EB851EB8
   do
-    let arr := n.toLEByteArray
+    let arr := toLEByteArray n
     let n' <- arr.toUInt64LE
     return n == n') == .ok true
 

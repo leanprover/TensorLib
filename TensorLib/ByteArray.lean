@@ -117,8 +117,8 @@ def _root_.ByteArray.readUInt64 (arr : ByteArray) (offset : Nat) : UInt64 :=
 
 section Test
 
-private def roundTripUInt32LE (x : UInt32) : Bool := x.toLEByteArray.toUInt32LE! == x
-private def roundTripUInt32BE (x : UInt32) : Bool := x.toBEByteArray.toUInt32BE! == x
+private def roundTripUInt32LE (x : UInt32) : Bool := (toLEByteArray x).toUInt32LE! == x
+private def roundTripUInt32BE (x : UInt32) : Bool := (toBEByteArray x).toUInt32BE! == x
 
 #guard roundTripUInt32LE 0xFFFF
 #guard roundTripUInt32LE 0x1010
@@ -132,6 +132,82 @@ warning: declaration uses 'sorry'
 -/
 #guard_msgs in
 example (x : UInt32) : roundTripUInt32LE x && roundTripUInt32BE x := by plausible
+
+end Test
+
+instance : ToLEByteArray (BitVec n) where
+  toLEByteArray bv := Id.run do
+    let value := bv.toNat
+    let numBytes := (n + 7) / 8
+    let mut ba : ByteArray := ByteArray.emptyWithCapacity numBytes
+    let mut remaining := value
+    for _ in [:numBytes] do
+      let byte : UInt8 := (remaining % 256).toUInt8
+      remaining := remaining / 256
+      ba := ba.push byte
+    ba
+
+instance : ToBEByteArray (BitVec n) where
+  toBEByteArray bv := (toLEByteArray bv).reverse
+
+#guard toBEByteArray (BitVec.ofNat 8 0xba) == ByteArray.mk #[0xba]
+#guard toBEByteArray (BitVec.ofNat 24 0xfedcba) == ByteArray.mk #[0xfe, 0xdc, 0xba]
+#guard toBEByteArray (BitVec.ofNat 24 0xabcdef) == ByteArray.mk #[0xab, 0xcd, 0xef]
+
+def _root_.ByteArray.toBitVecBE (arr : ByteArray) (n : Nat) : BitVec n := Id.run do
+  let bytesNeeded : Nat := (n + 7) / 8
+  let mut result : Nat := 0
+  let bytesToProcess := min bytesNeeded arr.size
+  for i in [:bytesToProcess] do
+    let byte : Nat := arr[i]!.toNat
+    result := (result <<< 8) ||| byte
+  let mask : Nat := if n == 0 then 0 else (1 <<< n) - 1
+  let finalValue := result &&& mask
+  BitVec.ofNat n finalValue
+
+def _root_.ByteArray.toBitVecLE (arr : ByteArray) (n : Nat) : BitVec n := arr.reverse.toBitVecBE n
+
+section Test
+open Plausible
+
+-- TODO: The BitVec/ByteArray round trips only work right now when the sizes line up. Relax this.
+
+#guard
+  let arr := ByteArray.mk #[0xff, 0xee, 0xdd]
+  toBEByteArray (arr.toBitVecBE 24) == arr
+
+#guard
+  let arr := ByteArray.mk #[0xff, 0xee, 0xdd]
+  toLEByteArray (arr.toBitVecLE 24) == arr
+
+private local instance : Shrinkable ByteArray where
+
+private local instance : SampleableExt ByteArray :=
+  SampleableExt.mkSelfContained do
+    let data ← SampleableExt.interpSample (Array UInt8)
+    return ByteArray.mk data
+
+/--
+info: Unable to find a counter-example
+---
+warning: declaration uses 'sorry'
+-/
+#guard_msgs in
+example (arr : ByteArray) :
+  let bv := arr.toBitVecBE (8 * arr.size)
+  let v := toBEByteArray bv
+  arr == v := by plausible
+
+/--
+info: Unable to find a counter-example
+---
+warning: declaration uses 'sorry'
+-/
+#guard_msgs in
+example (arr : ByteArray) :
+  let bv := arr.toBitVecLE (8 * arr.size)
+  let v := toLEByteArray bv
+  arr == v := by plausible
 
 end Test
 

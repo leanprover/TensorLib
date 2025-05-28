@@ -315,11 +315,11 @@ def arrayScalarInt (dtype : Dtype) (n : Int) : Err Tensor := do
 
 def arrayScalarInt! (dtype : Dtype) (n : Int) : Tensor := get! $ arrayScalarInt dtype n
 
-def arrayScalarFloat32 (f : Float32) : Err Tensor := arrayScalar Dtype.float32 f.toLEByteArray
+def arrayScalarFloat32 (f : Float32) : Err Tensor := arrayScalar Dtype.float32 (toLEByteArray f)
 
 def arrayScalarFloat32! (f : Float32) : Tensor := get! $ arrayScalarFloat32 f
 
-def arrayScalarFloat64 (f : Float) : Err Tensor := arrayScalar Dtype.float64 f.toLEByteArray
+def arrayScalarFloat64 (f : Float) : Err Tensor := arrayScalar Dtype.float64 (toLEByteArray f)
 
 def arrayScalarFloat64! (n : Float) : Tensor := get! $ arrayScalarFloat64 n
 

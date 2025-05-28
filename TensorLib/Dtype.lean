@@ -240,17 +240,17 @@ private def canCastFromInt (dtype : Dtype) (n : Int) : Bool :=
 def sizedStrides (dtype : Dtype) (s : Shape) : Strides := List.map (fun x => x * dtype.itemsize) s.unitStrides
 
 def byteArrayOfNatOverflow (dtype : Dtype) (n : Nat) : ByteArray := match dtype with
-| .bool => (if n == 0 then 0 else 1).toUInt8.toLEByteArray
-| .uint8 => n.toUInt8.toLEByteArray
-| .int8 => n.toInt8.toLEByteArray
-| .uint16 => n.toUInt16.toLEByteArray
-| .int16 => n.toInt16.toLEByteArray
-| .uint32 => n.toUInt32.toLEByteArray
-| .int32 => n.toInt32.toLEByteArray
-| .uint64 => n.toUInt64.toLEByteArray
-| .int64 => n.toInt64.toLEByteArray
-| .float32 => n.toFloat32.toLEByteArray
-| .float64 => n.toFloat.toLEByteArray
+| .bool => toLEByteArray (if n == 0 then 0 else 1).toUInt8
+| .uint8 => toLEByteArray n.toUInt8
+| .int8 => toLEByteArray n.toInt8
+| .uint16 => toLEByteArray n.toUInt16
+| .int16 => toLEByteArray n.toInt16
+| .uint32 => toLEByteArray n.toUInt32
+| .int32 => toLEByteArray n.toInt32
+| .uint64 => toLEByteArray n.toUInt64
+| .int64 => toLEByteArray n.toInt64
+| .float32 => toLEByteArray n.toFloat32
+| .float64 => toLEByteArray n.toFloat
 
 def byteArrayOfNat (dtype : Dtype) (n : Nat) : Err ByteArray :=
   if dtype.canCastFromNat n then .ok (dtype.byteArrayOfNatOverflow n)
@@ -271,13 +271,13 @@ private def byteArrayToNatRoundTrip (dtype : Dtype) (n : Nat) : Bool :=
 #guard !uint8.byteArrayToNatRoundTrip 256
 
 private def byteArrayOfIntOverflow (dtype : Dtype) (n : Int) : ByteArray := match dtype with
-| .bool => (UInt8.ofNat (if n == 0 then 0 else 1)).toLEByteArray
-| .uint8 | .int8 => n.toInt8.toLEByteArray
-| .uint16 | .int16 => n.toInt16.toLEByteArray
-| .uint32 | .int32 => n.toInt32.toLEByteArray
-| .uint64 | .int64 => n.toInt64.toLEByteArray
-| .float32 => n.toFloat32.toLEByteArray
-| .float64 => n.toFloat64.toLEByteArray
+| .bool => toLEByteArray (UInt8.ofNat (if n == 0 then 0 else 1))
+| .uint8 | .int8 => toLEByteArray n.toInt8
+| .uint16 | .int16 => toLEByteArray n.toInt16
+| .uint32 | .int32 => toLEByteArray n.toInt32
+| .uint64 | .int64 => toLEByteArray n.toInt64
+| .float32 => toLEByteArray n.toFloat32
+| .float64 => toLEByteArray n.toFloat64
 
 def byteArrayOfInt (dtype : Dtype) (n : Int) : Err ByteArray :=
   if dtype.canCastFromInt n then .ok (dtype.byteArrayOfIntOverflow n)
@@ -306,13 +306,13 @@ private def byteArrayToFloat64 (dtype : Dtype) (arr : ByteArray) : Err Float := 
 private def byteArrayToFloat64! (dtype : Dtype) (arr : ByteArray) : Float := get! $ byteArrayToFloat64 dtype arr
 
 def byteArrayOfFloat64 (dtype : Dtype) (f : Float) : Err ByteArray := match dtype with
-| .float64 => .ok f.toLEByteArray
+| .float64 => .ok $ toLEByteArray f
 | _ => .error "Illegal type conversion"
 
 private def byteArrayOfFloat64! (dtype : Dtype) (f : Float) : ByteArray := get! $ byteArrayOfFloat64 dtype f
 
 def byteArrayOfFloat32 (dtype : Dtype) (f : Float32) : Err ByteArray := match dtype with
-| .float32 => .ok f.toLEByteArray
+| .float32 => .ok $ toLEByteArray f
 | _ => .error "Illegal type conversion"
 
 private def byteArrayOfFloat32! (dtype : Dtype) (f : Float32) : ByteArray := get! $ byteArrayOfFloat32 dtype f
@@ -476,10 +476,10 @@ def castOverflow (fromDtype : Dtype) (data : ByteArray) (toDtype : Dtype) : Err 
     return toDtype.byteArrayOfIntOverflow f.toInt
   | .float32, .float64 => do
     let f <- Float32.ofLEByteArray data
-    return f.toFloat.toLEByteArray
+    return toLEByteArray f.toFloat
   | .float64, .float32 => do
     let f <- Float.ofLEByteArray data
-    return f.toFloat32.toLEByteArray
+    return toLEByteArray f.toFloat32
   | .float32, .float32 | .float64, .float64 => impossible
 
 def isZero (dtype : Dtype) (x : ByteArray) : Err Bool := match dtype with
@@ -510,14 +510,14 @@ def nonZero! (dtype : Dtype) (x : ByteArray) : Bool := get! $ dtype.nonZero x
 -- cognitive effort required to translate between numbers and bools.
 def logicalNot : Dtype -> ByteArray -> Err Bool := isZero
 
-#guard Dtype.uint64.isZero! (0 : UInt64).toLEByteArray
-#guard Dtype.uint64.isZero! (-0 : Int64).toLEByteArray
-#guard (0.0 : Float32).toLEByteArray.data.all fun x => x == 0
-#guard !(-0.0 : Float32).toLEByteArray.data.all fun x => x == 0
-#guard (0.0 : Float).toLEByteArray.data.all fun x => x == 0
-#guard !(-0.0 : Float).toLEByteArray.data.all fun x => x == 0
-#guard Dtype.float32.isZero! (-0.0 : Float32).toLEByteArray
-#guard Dtype.float64.isZero! (-0.0 : Float).toLEByteArray
+#guard Dtype.uint64.isZero! $ toLEByteArray (0 : UInt64)
+#guard Dtype.uint64.isZero! $ toLEByteArray (-0 : Int64)
+#guard (toLEByteArray (0.0 : Float32)).data.all fun x => x == 0
+#guard !(toLEByteArray (-0.0 : Float32)).data.all fun x => x == 0
+#guard (toLEByteArray (0.0 : Float)).data.all fun x => x == 0
+#guard !(toLEByteArray (-0.0 : Float)).data.all fun x => x == 0
+#guard Dtype.float32.isZero! $ toLEByteArray (-0.0 : Float32)
+#guard Dtype.float64.isZero! $ toLEByteArray (-0.0 : Float)
 
 private def logicalBinop (f : Bool -> Bool -> Bool) (t1 : Dtype) (x1 : ByteArray) (t2 : Dtype) (x2 : ByteArray) : Err Bool := do
   let z1 <- t1.nonZero x1
@@ -542,12 +542,12 @@ def logicalXor : Dtype -> ByteArray -> Dtype -> ByteArray -> Err Bool :=
 def logicalXor! (t1 : Dtype) (x1 : ByteArray) (t2 : Dtype) (x2 : ByteArray) : Bool :=
   get! $ logicalXor t1 x1 t2 x2
 
-#guard logicalAnd! Dtype.uint8 (1:UInt8).toLEByteArray Dtype.float64 (5:Float).toLEByteArray
-#guard !logicalAnd! Dtype.uint8 (1:UInt8).toLEByteArray Dtype.float64 (-0:Float).toLEByteArray
-#guard logicalOr! Dtype.uint8 (1:UInt8).toLEByteArray Dtype.float64 (-0:Float).toLEByteArray
-#guard logicalOr! Dtype.uint8 (0:UInt8).toLEByteArray Dtype.float64 (-0.1:Float).toLEByteArray
-#guard !logicalOr! Dtype.uint8 (0:UInt8).toLEByteArray Dtype.float64 (-0.0:Float).toLEByteArray
-#guard !logicalXor! Dtype.uint8 (0:UInt8).toLEByteArray Dtype.float64 (-0.0:Float).toLEByteArray
+#guard logicalAnd! Dtype.uint8 (toLEByteArray (1:UInt8)) Dtype.float64 (toLEByteArray (5:Float))
+#guard !logicalAnd! Dtype.uint8 (toLEByteArray (1:UInt8)) Dtype.float64 (toLEByteArray (-0:Float))
+#guard logicalOr! Dtype.uint8 (toLEByteArray (1:UInt8)) Dtype.float64 (toLEByteArray (-0:Float))
+#guard logicalOr! Dtype.uint8 (toLEByteArray (0:UInt8)) Dtype.float64 (toLEByteArray (-0.1:Float))
+#guard !logicalOr! Dtype.uint8 (toLEByteArray (0:UInt8)) Dtype.float64 (toLEByteArray (-0.0:Float))
+#guard !logicalXor! Dtype.uint8 (toLEByteArray (0:UInt8)) Dtype.float64 (toLEByteArray (-0.0:Float))
 
 /-
 When you call real functions on int arrays, for example, NumPy converts the array to some float
@@ -567,11 +567,11 @@ private def liftFloatUnop (f32 : Float32 -> Err Float32) (f64 : Float -> Err Flo
   | .float32 => do
     let f <- Float32.ofLEByteArray data
     let x <- f32 f
-    return x.toLEByteArray
+    return toLEByteArray x
   | .float64 => do
     let f <- Float.ofLEByteArray data
     let x <- f64 f
-    return x.toLEByteArray
+    return toLEByteArray x
   | _ => throw "operation requires a float type"
 
 def arctan : Dtype -> ByteArray -> Err ByteArray :=
@@ -623,7 +623,7 @@ private def shift (f : UInt64 -> UInt64 -> UInt64) (dtype : Dtype) (bits : ByteA
   let n64 := bits.toNat.toUInt64
   let shift64 := shiftAmount.toNat.toUInt64
   let n64 := f n64 shift64
-  return n64.toLEByteArray.take k
+  return (toLEByteArray n64).take k
 
 def leftShift : Dtype -> ByteArray -> ByteArray -> Err ByteArray :=
   shift UInt64.shiftLeft
@@ -709,7 +709,7 @@ private def closeEnough32! (x y : ByteArray) (err : Float32 := 0.000001) : Bool 
 #guard
   let typ := Dtype.float64
   let n : Float := 1.1
-  let arr := n.toLEByteArray
+  let arr := toLEByteArray n
   let sin := typ.sin! arr
   let cos := typ.cos! arr
   let div := typ.div! sin cos
@@ -721,7 +721,7 @@ private def closeEnough32! (x y : ByteArray) (err : Float32 := 0.000001) : Bool 
 #guard
   let typ := Dtype.float32
   let n : Float32 := 1.1
-  let arr := n.toLEByteArray
+  let arr := toLEByteArray n
   let sin := typ.sin! arr
   let cos := typ.cos! arr
   let div := typ.div! sin cos
@@ -732,7 +732,7 @@ private def closeEnough32! (x y : ByteArray) (err : Float32 := 0.000001) : Bool 
 #guard
   let typ := Dtype.float64
   let n : Float := 1.1
-  let arr := n.toLEByteArray
+  let arr := toLEByteArray n
   let exp := typ.exp! arr
   let log := typ.log! exp
   closeEnough64! log arr
@@ -741,7 +741,7 @@ private def closeEnough32! (x y : ByteArray) (err : Float32 := 0.000001) : Bool 
 #guard
   let typ := Dtype.float32
   let n : Float32 := 1.1
-  let arr := n.toLEByteArray
+  let arr := toLEByteArray n
   let exp := typ.exp! arr
   let log := typ.log! exp
   closeEnough32! log arr
