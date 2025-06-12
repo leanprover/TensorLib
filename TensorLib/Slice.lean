@@ -295,7 +295,7 @@ private theorem size0 (s : Slice) : s.size 0 = 0 := by
   unfold size defaults stopOrDefault natDivCeil startOrDefault
   cases H0 : s.dir <;> cases H1 : s.start <;> cases H2 : s.stop <;> simp
 
-private theorem add_div_le {a b c d : Nat} (H1 : (b : Nat) < c) (H2 : a <= d) : (a + b) / c ≤ d := by
+private theorem add_div_le {a b c d : Nat} (H1 : b < c) (H2 : a <= d) : (a + b) / c ≤ d := by
   rw [Nat.div_le_iff_le_mul] <;> try omega
   cases d <;> try omega
   rename_i d
@@ -312,15 +312,22 @@ private theorem le_div_le (c : Nat) (H : a ≤ b) : a / c ≤ b := by
   rename_i c
   rw [Nat.div_le_iff_le_mul, Nat.mul_add] <;> try omega
 
+private theorem div_succ (k s : Nat) : (k + s) / s ≤ k + 1 := by
+  cases s <;> try omega
+  simp
+  rename_i n
+  apply le_div_le
+  omega
+
 private theorem sizeDim (s : Slice) (dim : Nat) : s.size dim <= dim := by
   cases H_dim : dim ; simp [size0]
   rename_i k
   unfold size defaults stopOrDefault natDivCeil startOrDefault
+  simp
   cases H0 : s.dir
   . have H8 := stepForward H0
     cases H1 : s.start <;> cases H2 : s.stop <;> generalize H4 : s.stepOrDefault.toNat = step <;> simp_all
-    . rw [add_sub_assoc] <;> try omega
-      apply add_div_le <;> try omega
+    . apply div_succ
     . rename_i a
       by_cases H5 : a < -(k+1) <;> simp [H5]
       . rw [Nat.div_eq_of_lt] <;> omega
@@ -332,12 +339,10 @@ private theorem sizeDim (s : Slice) (dim : Nat) : s.size dim <= dim := by
           by_cases H7 : a < ↑k + 1 <;> simp [H7]
           . rw [add_sub_assoc] <;> try omega
             apply add_div_le <;> omega
-          . rw [add_sub_assoc] <;> try omega
-            apply add_div_le <;> omega
+          . apply div_succ
     . rename_i a
       by_cases H5 : a < -(k+1) <;> simp [H5]
-      . rw [add_sub_assoc] <;> try omega
-        apply add_div_le <;> try omega
+      . apply div_succ
       . by_cases H6 : a < 0 <;> simp [H6]
         . simp [show -(↑k + 1) ≤ a by omega]
           rw [add_sub_assoc] <;> try omega
@@ -390,7 +395,6 @@ private theorem sizeDim (s : Slice) (dim : Nat) : s.size dim <= dim := by
         . simp [show 0 <= a by omega]
           by_cases H7 : a < ↑k + 1 <;> simp [H7]
           . apply le_div_le ; omega
-          . apply le_div_le ; omega
     . rename_i a
       by_cases H5 : a < -(k+1) <;> simp [H5]
       . apply le_div_le ; omega
@@ -438,7 +442,6 @@ private theorem sizeDim (s : Slice) (dim : Nat) : s.size dim <= dim := by
             . apply le_div_le ; omega
             . simp [show 0 ≤ b by omega]
               by_cases H12 : b < k+1 <;> simp [H12]
-              . apply le_div_le ; omega
               . apply le_div_le ; omega
 
 -- Reference implementation. When we do it for real we will use an iterator.
