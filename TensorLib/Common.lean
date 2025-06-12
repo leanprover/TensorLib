@@ -17,6 +17,11 @@ instance : MonadLift Option Err where
   | .none => throw "none"
   | .some v => return v
 
+instance : MonadLift Err IO where
+  monadLift
+  | .error msg => throw (IO.userError msg)
+  | .ok v => return v
+
 def impossible {a : Type} [h : Inhabited a] (msg : String := "") := @panic a h s!"Impossible invariant violation: {msg}"
 
 def get! [Inhabited a] (x : Err a) : a := match x with
