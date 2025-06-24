@@ -31,6 +31,9 @@ def _root_.ByteArray.toUInt64LE (bs : ByteArray) : Err UInt64 :=
 def _root_.ByteArray.toUInt64BE (bs : ByteArray) : Err UInt64 :=
   if bs.size != 8 then throw "Expected size 8 byte array" else return bs.toUInt64BE!
 
+def _root_.ByteArray.toInt64LE! (bs : ByteArray) : Int64 := bs.toUInt64LE!.toInt64
+def _root_.ByteArray.toInt64BE! (bs : ByteArray) : Int64 := bs.toUInt64BE!.toInt64
+
 /-- Interpret a `ByteArray` of size 4 as a little-endian `UInt32`. Missing from Lean stdlib. -/
 def _root_.ByteArray.toUInt32LE (bs : ByteArray) : Err UInt32 :=
   if bs.size != 4 then throw "Expected size 4 byte array" else
@@ -49,6 +52,8 @@ def _root_.ByteArray.toUInt32BE (bs : ByteArray) : Err UInt32 :=
 
 def _root_.ByteArray.toUInt32LE! (bs : ByteArray) : UInt32 := get! bs.toUInt32LE
 def _root_.ByteArray.toUInt32BE! (bs : ByteArray) : UInt32 := get! bs.toUInt32BE
+def _root_.ByteArray.toInt32LE! (bs : ByteArray) : Int32 := bs.toUInt32LE!.toInt32
+def _root_.ByteArray.toInt32BE! (bs : ByteArray) : Int32 := bs.toUInt32BE!.toInt32
 
 /-- Interpret a `ByteArray` of size 2 as a little-endian `UInt16`. Missing from Lean stdlib. -/
 def _root_.ByteArray.toUInt16LE (bs : ByteArray) : Err UInt16 :=
@@ -64,6 +69,8 @@ def _root_.ByteArray.toUInt16BE (bs : ByteArray) : Err UInt16 :=
 
 def _root_.ByteArray.toUInt16LE! (bs : ByteArray) : UInt16 := get! bs.toUInt16LE
 def _root_.ByteArray.toUInt16BE! (bs : ByteArray) : UInt16 := get! bs.toUInt16BE
+def _root_.ByteArray.toInt16LE! (bs : ByteArray) : Int16 := bs.toUInt16LE!.toInt16
+def _root_.ByteArray.toInt16BE! (bs : ByteArray) : Int16 := bs.toUInt16BE!.toInt16
 
 def _root_.ByteArray.reverse (arr : ByteArray) : ByteArray := ⟨ arr.data.reverse ⟩
 
@@ -106,6 +113,9 @@ def _root_.ByteArray.take (arr : ByteArray) (n : Nat) : ByteArray :=
 
 def _root_.ByteArray.drop (arr : ByteArray) (n : Nat) : ByteArray :=
   ByteArray.mk (arr.data.drop n)
+
+def _root_.ByteArray.splitAt (arr : ByteArray) (n : Nat) : ByteArray × ByteArray :=
+  (arr.take n, arr.drop n)
 
 def _root_.ByteArray.readUInt32 (arr : ByteArray) (offset : Nat) : UInt32 :=
   if arr.size < offset + 4 then 0 else
