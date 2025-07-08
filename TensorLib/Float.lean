@@ -41,23 +41,23 @@ instance : ToLEByteArray Float where
 instance : ToBEByteArray Float where
   toBEByteArray f := toBEByteArray f.toBits
 
-def Float32.ofLEByteArray (arr : ByteArray) : Err Float32 := do
+def _root_.Float32.ofLEByteArray (arr : ByteArray) : Err Float32 := do
   return Float32.ofBits (<- arr.toUInt32LE)
 
-def Float32.ofBEByteArray (arr : ByteArray) : Err Float32 := do
+def _root_.Float32.ofBEByteArray (arr : ByteArray) : Err Float32 := do
   return Float32.ofBits (<- arr.toUInt32BE)
 
-def Float32.ofLEByteArray! (arr : ByteArray) : Float32 := get! $ Float32.ofLEByteArray arr
-def Float32.ofBEByteArray! (arr : ByteArray) : Float32 := get! $ Float32.ofBEByteArray arr
+def _root_.Float32.ofLEByteArray! (arr : ByteArray) : Float32 := get! $ Float32.ofLEByteArray arr
+def _root_.Float32.ofBEByteArray! (arr : ByteArray) : Float32 := get! $ Float32.ofBEByteArray arr
 
-def Float.ofLEByteArray (arr : ByteArray) : Err Float := do
+def _root_.Float.ofLEByteArray (arr : ByteArray) : Err Float := do
   return Float.ofBits (<- arr.toUInt64LE)
 
-def Float.ofBEByteArray (arr : ByteArray) : Err Float := do
+def _root_.Float.ofBEByteArray (arr : ByteArray) : Err Float := do
   return Float.ofBits (<- arr.toUInt64BE)
 
-def Float.ofLEByteArray! (arr : ByteArray) : Float := get! $ Float.ofLEByteArray arr
-def Float.ofBEByteArray! (arr : ByteArray) : Float := get! $ Float.ofBEByteArray arr
+def _root_.Float.ofLEByteArray! (arr : ByteArray) : Float := get! $ Float.ofLEByteArray arr
+def _root_.Float.ofBEByteArray! (arr : ByteArray) : Float := get! $ Float.ofBEByteArray arr
 
 def _root_.Float32.toNat (f : Float32) : Nat := f.toUInt64.toNat
 

@@ -52,8 +52,11 @@ def _root_.ByteArray.toUInt32BE (bs : ByteArray) : Err UInt32 :=
 
 def _root_.ByteArray.toUInt32LE! (bs : ByteArray) : UInt32 := get! bs.toUInt32LE
 def _root_.ByteArray.toUInt32BE! (bs : ByteArray) : UInt32 := get! bs.toUInt32BE
-def _root_.ByteArray.toInt32LE! (bs : ByteArray) : Int32 := bs.toUInt32LE!.toInt32
-def _root_.ByteArray.toInt32BE! (bs : ByteArray) : Int32 := bs.toUInt32BE!.toInt32
+
+def _root_.ByteArray.toInt32LE (bs : ByteArray) : Err Int32 := bs.toUInt32LE.map UInt32.toInt32
+def _root_.ByteArray.toInt32BE (bs : ByteArray) : Err Int32 := bs.toUInt32BE.map UInt32.toInt32
+def _root_.ByteArray.toInt32LE! (bs : ByteArray) : Int32 := get! bs.toInt32LE
+def _root_.ByteArray.toInt32BE! (bs : ByteArray) : Int32 := get! bs.toInt32BE
 
 /-- Interpret a `ByteArray` of size 2 as a little-endian `UInt16`. Missing from Lean stdlib. -/
 def _root_.ByteArray.toUInt16LE (bs : ByteArray) : Err UInt16 :=
@@ -69,8 +72,11 @@ def _root_.ByteArray.toUInt16BE (bs : ByteArray) : Err UInt16 :=
 
 def _root_.ByteArray.toUInt16LE! (bs : ByteArray) : UInt16 := get! bs.toUInt16LE
 def _root_.ByteArray.toUInt16BE! (bs : ByteArray) : UInt16 := get! bs.toUInt16BE
-def _root_.ByteArray.toInt16LE! (bs : ByteArray) : Int16 := bs.toUInt16LE!.toInt16
-def _root_.ByteArray.toInt16BE! (bs : ByteArray) : Int16 := bs.toUInt16BE!.toInt16
+
+def _root_.ByteArray.toInt16LE (bs : ByteArray) : Err Int16 := bs.toUInt16LE.map UInt16.toInt16
+def _root_.ByteArray.toInt16BE (bs : ByteArray) : Err Int16 := bs.toUInt16BE.map UInt16.toInt16
+def _root_.ByteArray.toInt16LE! (bs : ByteArray) : Int16 := get! bs.toInt16LE
+def _root_.ByteArray.toInt16BE! (bs : ByteArray) : Int16 := get! bs.toInt16BE
 
 def _root_.ByteArray.reverse (arr : ByteArray) : ByteArray := ⟨ arr.data.reverse ⟩
 
