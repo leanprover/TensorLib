@@ -33,6 +33,16 @@ instance : ToLEByteArray ByteArray where
 instance : ToBEByteArray ByteArray where
   toBEByteArray arr := arr
 
+instance : ToLEByteArray Bool where
+  toLEByteArray
+  | false => ByteArray.mk #[0]
+  | true  => ByteArray.mk #[1]
+
+instance : ToBEByteArray Bool where
+  toBEByteArray
+  | false => ByteArray.mk #[0]
+  | true  => ByteArray.mk #[1]
+
 -- We cast between UIntX and ByteArray without going through BitVec, which is represented
 -- as a Nat at runtime. We'll have tests for these in our ByteArray extension module where we
 -- have conversions back and forth between LE ByteArrays and UIntX.

@@ -325,6 +325,10 @@ def arrayScalarInt (dtype : Dtype) (n : Int) : Err Tensor := do
 
 def arrayScalarInt! (dtype : Dtype) (n : Int) : Tensor := get! $ arrayScalarInt dtype n
 
+def arrayScalarBool  (b : Bool) : Err Tensor := arrayScalar Dtype.bool (toLEByteArray b)
+
+def arrayScalarBool! (b : Bool) : Tensor := get! $ arrayScalarBool b
+
 def arrayScalarFloat32 (f : Float32) : Err Tensor := arrayScalar Dtype.float32 (toLEByteArray f)
 
 def arrayScalarFloat32! (f : Float32) : Tensor := get! $ arrayScalarFloat32 f
@@ -405,6 +409,20 @@ def ofIntList (dtype : Dtype) (ns : List Int) : Err Tensor := do
   .ok { arr with data := data }
 
 def ofIntList! (dtype : Dtype) (ns : List Int) : Tensor := get! $ ofIntList dtype ns
+
+def ofFloat32List (ns : List Float32) : Err Tensor := do
+  let dtype := TensorLib.Dtype.float32
+  let size := dtype.itemsize
+  let arr := Tensor.zeros dtype (Shape.mk [ns.length])
+  let mut data := arr.data
+  let mut posn := 0
+  for n in ns do
+    let v <- dtype.byteArrayOfFloat32 n
+    data := v.copySlice 0 data posn size
+    posn := posn + size
+  .ok { arr with data := data }
+
+def ofFloat32List! (ns : List Float32) : Tensor := get! $ ofFloat32List ns
 
 def getDimIndex (arr : Tensor) (index : DimIndex) : Err ByteArray :=
   if arr.shape.ndim != index.length then .error "getDimIndex: index mismatch" else
