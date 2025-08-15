@@ -79,8 +79,8 @@ private theorem oneExtendPrefixLength (b : Broadcast) :
   rename_i left right
   simp [oneExtendPrefix]
   by_cases H : left.ndim <= right.ndim
-  . simp_all [Shape.ndim, H]
-  . simp_all [Shape.ndim, H]
+  . simp_all [Shape.ndim]
+  . simp_all [Shape.ndim]
     aesop (config := { warnOnNonterminal := false })
     rw [Nat.sub_add_cancel]
     omega

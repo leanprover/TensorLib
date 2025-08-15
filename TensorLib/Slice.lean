@@ -237,7 +237,7 @@ theorem stopRange (s : Slice) (dim : Nat) :
       by_cases H : k < -dim
       all_goals simp [H]
       by_cases H1 : k < 0
-      . simp [H, H1]
+      . simp [H1]
         aesop (config := { warnOnNonterminal := false })
         all_goals omega
       . aesop (config := { warnOnNonterminal := false })
