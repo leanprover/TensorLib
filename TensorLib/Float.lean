@@ -36,6 +36,11 @@ private def float64MantissaBits : Nat := 52
 def maxSafeNatForFloat32 : Nat := Nat.pow 2 (float32MantissaBits + 1)
 def maxSafeNatForFloat64 : Nat := Nat.pow 2 (float64MantissaBits + 1)
 
+def _root_.Float32.minValue : Float32 := Float32.ofBits 0xFF7FFFFF
+def _root_.Float32.maxValue : Float32 := Float32.ofBits 0x7F7FFFFF
+def _root_.Float.minValue : Float := Float.ofBits 0xFFEFFFFFFFFFFFFF
+def _root_.Float.maxValue : Float := Float.ofBits 0x7FEFFFFFFFFFFFFF
+
 def _root_.Int.toFloat32 (n : Int) : Float32 := Float32.ofInt n
 def _root_.Int.toFloat64 (n : Int) : Float := Float.ofInt n
 
