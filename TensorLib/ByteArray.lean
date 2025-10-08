@@ -14,6 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 -/
 
+import Batteries.Data.ByteArray
 import Plausible
 import TensorLib.Bytes
 import TensorLib.Common
@@ -168,9 +169,6 @@ def _root_.ByteArray.replicate (n : Nat) (v : UInt8) : ByteArray := Id.run do
   arr
 
 #guard ByteArray.replicate 5 7 == ⟨ #[7, 7, 7, 7, 7] ⟩
-
-@[simp] theorem _root_.ByteArray.size_push (a : ByteArray) (b : UInt8) : (a.push b).size = a.size + 1 :=
-  Array.size_push ..
 
 private theorem _root_.ByteArray.replicateSizeAux (arr : ByteArray) (xs : List a) (v : UInt8) : (List.foldl (fun b _ => b.push v) arr xs).size = arr.size + xs.length := by
   revert arr
