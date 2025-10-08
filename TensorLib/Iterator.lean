@@ -219,7 +219,7 @@ instance instPairCarry [inst1 : Iterator i1 v1] [inst2 : Iterator i2 v2] : Itera
     | .some l => some (l, r)
     | .none =>
       let l := inst1.reset l
-       match inst2.next r with
+      match inst2.next r with
       | .none => .none
       | .some r => .some (l, r)
 
