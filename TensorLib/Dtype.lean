@@ -38,6 +38,7 @@ inductive Dtype where
 | uint64
 | float32
 | float64
+| float16
 deriving BEq, Repr, Inhabited
 
 
@@ -79,6 +80,7 @@ instance : ToString Dtype where
   | uint64 => "uint64"
   | float32 => "float32"
   | float64 => "float64"
+  | float16 => "float16"
 
 def isOneByte (x : Dtype) : Bool := match x with
 | bool | int8 | uint8 => true
@@ -104,7 +106,7 @@ def isFloat (x : Dtype) : Bool := match x with
 def itemsize (x : Dtype) : Nat := match x with
 | float64 | int64 | uint64 => 8
 | float32 | int32 | uint32 => 4
-| int16 | uint16 => 2
+| float16 | int16 | uint16 => 2
 | bool | int8 | uint8 => 1
 
 -- This is the type NumPy returns when using binary operators on arrays
@@ -113,6 +115,11 @@ def join (x y : Dtype) : Option Dtype :=
   let (x, y) := if x.itemsize <= y.itemsize then (x, y) else (y, x)
   if x == y then x else
   match x, y with
+  | float16, float16 => float16
+  | float16, float32 => float32
+  | float16, float64 => float64
+  | float16, _ => none
+  | _, float16 => none
   | float32, float64 => float64
   | float32, _
   | _, float32
@@ -135,6 +142,7 @@ def join (x y : Dtype) : Option Dtype :=
   | _, int64
   | uint64, _ => none -- NumPy gives "can't safely coerce" for uint64/int64
 
+-- Can we cast from one dtype to another without losing information
 def lossless (fromDtype toDtype : Dtype) : Bool := match fromDtype, toDtype with
 | .bool, _ => true
 | _, .bool => false
@@ -181,6 +189,10 @@ def lossless (fromDtype toDtype : Dtype) : Bool := match fromDtype, toDtype with
 | .int64, _ => false
 | .uint64, .uint64 => true
 | .uint64, _ => false
+| .float16, .float16
+| .float16, .float32
+| .float16, .float64 => true
+| .float16, _ => false
 | .float32, .float32
 | .float32, .float64 => true
 | .float32, _ => false
@@ -224,6 +236,7 @@ private def maxSafeNat : Dtype -> Option Nat
 | .int32 => some 0x7FFFFFFF
 | .uint64 => some 0xFFFFFFFFFFFFFFFF
 | .int64 => some 0x7FFFFFFFFFFFFFFF
+| .float16 => maxSafeNatForFloat16
 | .float32 => maxSafeNatForFloat32
 | .float64 => maxSafeNatForFloat64
 
@@ -241,6 +254,7 @@ private def minSafeInt : Dtype -> Option Int
 | .int16 => some (-0x8000)
 | .int32 => some (-0x80000000)
 | .int64 => some (-0x8000000000000000)
+| .float16 => some (-maxSafeNatForFloat16)
 | .float32 => some (-maxSafeNatForFloat32)
 | .float64 => some (-maxSafeNatForFloat64)
 
@@ -260,6 +274,7 @@ def byteArrayOfNatOverflow (dtype : Dtype) (n : Nat) : ByteArray := match dtype 
 | .int32 => toLEByteArray n.toInt32
 | .uint64 => toLEByteArray n.toUInt64
 | .int64 => toLEByteArray n.toInt64
+| .float16 => toLEByteArray n.toFloat32.toFloat16Bits
 | .float32 => toLEByteArray n.toFloat32
 | .float64 => toLEByteArray n.toFloat
 
@@ -287,6 +302,7 @@ private def byteArrayOfIntOverflow (dtype : Dtype) (n : Int) : ByteArray := matc
 | .uint16 | .int16 => toLEByteArray n.toInt16
 | .uint32 | .int32 => toLEByteArray n.toInt32
 | .uint64 | .int64 => toLEByteArray n.toInt64
+| .float16 => toLEByteArray n.toFloat32.toFloat16Bits
 | .float32 => toLEByteArray n.toFloat32
 | .float64 => toLEByteArray n.toFloat64
 
@@ -362,6 +378,13 @@ private def byteArrayToFloat32RoundTrip (dtype : Dtype) (f : Float32) : Bool :=
 #guard float32.byteArrayToFloat32RoundTrip (Float32.sqrt 2)
 #guard float32.byteArrayToFloat32RoundTrip 0
 
+
+-- Read 2 bytes as fp16, convert to fp32
+-- perform arithmetic computations since lean doesnt have native fp16 and finally downcast to fp16 to store result
+def byteArrayToFloat16AsFloat32 (arr : ByteArray) : Err Float32 := do
+  let bits ← arr.toUInt16LE -- Read 2 bytes as UInt16 in little Endian
+  return bits.toFloat32FromFloat16
+
 /-
 NumPy addition overflows and underflows without complaint. We will do the same.
 -/
@@ -378,6 +401,10 @@ def add (dtype : Dtype) (x y : ByteArray) : Err ByteArray :=
     return dtype.byteArrayOfNatOverflow (x.toNat + y.toNat)
   | .int8 | .int16| .int32 | .int64 => do
     dtype.byteArrayOfInt (x.toInt + y.toInt)
+  | .float16 => do -- read inputs as fp32
+    let x <- byteArrayToFloat16AsFloat32 x
+    let y <- byteArrayToFloat16AsFloat32 y
+    return toLEByteArray (x + y).toFloat16Bits -- add in fp32 then downcast to fp16
   | .float32 => do
     let x <- dtype.byteArrayToFloat32 x
     let y <- dtype.byteArrayToFloat32 y
@@ -400,6 +427,10 @@ def sub (dtype : Dtype) (x y : ByteArray) : Err ByteArray :=
     let x <- dtype.byteArrayToFloat32 x
     let y <- dtype.byteArrayToFloat32 y
     dtype.byteArrayOfFloat32 (x - y)
+  | .float16 => do
+    let x <- byteArrayToFloat16AsFloat32 x
+    let y <- byteArrayToFloat16AsFloat32 y
+    return toLEByteArray (x - y).toFloat16Bits -- sub in fp32 then store result in fp16
   | .float64 => do
     let x <- dtype.byteArrayToFloat64 x
     let y <- dtype.byteArrayToFloat64 y
@@ -419,6 +450,10 @@ def mul (dtype : Dtype) (x y : ByteArray) : Err ByteArray :=
     let x <- dtype.byteArrayToFloat32 x
     let y <- dtype.byteArrayToFloat32 y
     dtype.byteArrayOfFloat32 (x * y)
+  | .float16 => do
+    let x <- byteArrayToFloat16AsFloat32 x
+    let y <- byteArrayToFloat16AsFloat32 y
+    return toLEByteArray (x * y).toFloat16Bits -- multiply in fp32 then downcast to fp16 to store
   | .float64 => do
     let x <- dtype.byteArrayToFloat64 x
     let y <- dtype.byteArrayToFloat64 y
@@ -438,6 +473,10 @@ def div (dtype : Dtype) (x y : ByteArray) : Err ByteArray :=
     let x <- dtype.byteArrayToFloat32 x
     let y <- dtype.byteArrayToFloat32 y
     dtype.byteArrayOfFloat32 (x / y)
+  | .float16 => do
+    let x <- byteArrayToFloat16AsFloat32 x
+    let y <- byteArrayToFloat16AsFloat32 y
+    return toLEByteArray (x / y).toFloat16Bits -- divide in fp32 then downcast to fp16
   | .float64 => do
     let x <- dtype.byteArrayToFloat64 x
     let y <- dtype.byteArrayToFloat64 y
@@ -455,6 +494,9 @@ def abs (dtype : Dtype) (x : ByteArray) : Err ByteArray := do
   match dtype with
   | .uint8 | .uint16 | .uint32 | .uint64 => return x
   | .int8 | .int16| .int32 | .int64 => return dtype.byteArrayOfIntOverflow x.toInt.natAbs
+  | .float16 => do
+    let x <- byteArrayToFloat16AsFloat32 x
+    return toLEByteArray x.abs.toFloat16Bits
   | .float32 =>
     let x <- dtype.byteArrayToFloat32 x
     dtype.byteArrayOfFloat32 x.abs
@@ -488,6 +530,29 @@ def castOverflow (fromDtype : Dtype) (data : ByteArray) (toDtype : Dtype) : Err 
   | .float32, .float64 => do
     let f <- Float32.ofLEByteArray data
     return toLEByteArray f.toFloat
+   -- float16 to integer types: change to float32, then convert to int/nat
+  | .float16, .uint8 | .float16, .uint16 | .float16, .uint32 | .float16, .uint64 => do
+    let f ← byteArrayToFloat16AsFloat32 data
+    return toDtype.byteArrayOfNatOverflow f.toNat
+  | .float16, .int8 | .float16, .int16 | .float16, .int32 | .float16, .int64 => do
+    let f ← byteArrayToFloat16AsFloat32 data
+    return toDtype.byteArrayOfIntOverflow f.toInt
+  -- float16 to float32/float64: decode to float32, then widen if needed
+  | .float16, .float32 => do
+    let f ← byteArrayToFloat16AsFloat32 data
+    return toLEByteArray f
+  | .float16, .float64 => do
+    let f ← byteArrayToFloat16AsFloat32 data
+    return toLEByteArray f.toFloat
+  -- float32/float64 → float16: decode, then downcast to float16 bits
+  | .float32, .float16 => do
+    let f ← Float32.ofLEByteArray data
+    return toLEByteArray f.toFloat16Bits
+  | .float64, .float16 => do
+    let f ← Float.ofLEByteArray data
+    return toLEByteArray f.toFloat32.toFloat16Bits
+  -- float16 to float16: already handled by the `if fromDtype == toDtype` check above
+  | .float16, .float16 => impossible
   | .float64, .float32 => do
     let f <- Float.ofLEByteArray data
     return toLEByteArray f.toFloat32
@@ -504,6 +569,9 @@ def isZero (dtype : Dtype) (x : ByteArray) : Err Bool := match dtype with
 | int64
 | uint64 => return x.data.all fun v => v == 0
 -- We need to worry about -0, which is not all 0s in the bit pattern.
+| float16 => do
+  let f <- byteArrayToFloat16AsFloat32 x
+  return f == 0
 | float32 => do
   let f <- Float32.ofLEByteArray x
   return f == 0
@@ -626,7 +694,7 @@ def tanh : Dtype -> ByteArray -> Err ByteArray :=
 def tanh! (dtype : Dtype) (data : ByteArray) : ByteArray := get! $ tanh dtype data
 
 private def shift (f : UInt64 -> UInt64 -> UInt64) (dtype : Dtype) (bits : ByteArray) (shiftAmount : ByteArray) : Err ByteArray := match dtype with
-| .float32 | .float64 => throw "shifts not supported at float type"
+| .float32 | .float64 | .float16 => throw "shifts not supported at float type"
 | .bool => throw "In NumPy, bool shifts are cast to int64. This seems arbitrary so please cast (e.g. with astype) before you shift."
 | .uint64 | .int64 | .uint32 | .int32 | .uint16 | .int16 | .uint8 | .int8 =>
   let k := dtype.itemsize
