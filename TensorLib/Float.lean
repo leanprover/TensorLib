@@ -32,9 +32,12 @@ https://en.wikipedia.org/wiki/Double-precision_floating-point_format
 -/
 private def float32MantissaBits : Nat := 23
 private def float64MantissaBits : Nat := 52
+private def float16MantissaBits : Nat := 10
+
 -- Add 1 to the mantissa length because of the implicit leading 1
 def maxSafeNatForFloat32 : Nat := Nat.pow 2 (float32MantissaBits + 1)
 def maxSafeNatForFloat64 : Nat := Nat.pow 2 (float64MantissaBits + 1)
+def maxSafeNatForFloat16 : Nat := Nat.pow 2 (float16MantissaBits + 1)
 
 def _root_.Float32.minValue : Float32 := Float32.ofBits 0xFF7FFFFF
 def _root_.Float32.maxValue : Float32 := Float32.ofBits 0x7F7FFFFF
@@ -95,6 +98,44 @@ def _root_.Float.toInt (f : Float) : Int :=
   if neg then -n else n
 
 def _root_.Float.quietNaN : Float := Float.ofBits 0x7FF8000000000000
+
+-- Convert a float32 to Float16 as UInt16
+def _root_.Float32.toFloat16Bits (f : Float32) : UInt16 :=
+  let bits := f.toBits
+  let sign := (bits >>> 31) &&& 1
+  let exp := (bits >>> 23) &&& 0xFF
+  let mant := bits &&& 0x7FFFFF
+  let sign16 := sign.toUInt16 <<< 15
+  if exp == 0 then sign16 -- 0 or subnormal float32 is 0 in float16
+  else if exp == 0xFF then sign16 ||| ((0x1F : UInt16) <<< 10) ||| (mant >>> 13).toUInt16 -- if Inf or NaN. 0x1F
+  else
+    let newExp : Int := exp.toNat - 127 + 15 -- rebias from float32 to float16 bias
+    if newExp >= 0x1F then sign16 ||| ((0x1F : UInt16) <<< 10) -- overflow -> inf
+    else if newExp <= 0 then sign16 -- underflow -> 0
+    else sign16 ||| (newExp.toNat.toUInt16 <<< 10) ||| (mant >>> 13).toUInt16
+
+
+-- Convert float16 bits (stored as UInt) to float32.
+-- Extract sign, exp, and mantissa from 16 bit representation
+-- Check for zero, inf, NaN
+-- If number is none of the above then adjust bias (add 127 - 15)
+-- left shift mantissa 13
+-- pack it into 32 bit layout
+def _root_.UInt16.toFloat32FromFloat16 (bits : UInt16) : Float32 :=
+  let sign := (bits >>> 15) &&& 1  -- sign bit; positive = 0, negative = 1
+  let exp := (bits >>> 10) &&& 0x1F -- extract bits 14..10
+  let mant := bits &&& 0x3FF -- mantissa bits
+  if exp ==  0 && mant == 0 then
+    if sign == 1 then Float32.ofBits 0x80000000 -- -0
+    else Float32.ofBits 0  -- +0
+  else if exp == 0x1FF then -- exp is all 1's so this is either +-inf or NaN
+    if mant == 0 then Float32.ofBits (sign.toUInt32 <<< 32 ||| 0x7F800000) -- +- inf
+    else Float32.ofBits 0x7FC00000 -- Nan
+  else
+    -- Rebias the exponent from float16 (15) bias to float32 (127)
+    -- shift mant from 10 bits to 23 bits so pad with 13 0's
+    let newExp := exp.toUInt32 - 15 + 127
+    Float32.ofBits (sign.toUInt32 <<< 31 ||| newExp <<< 23 ||| mant.toUInt32 <<< 13)
 
 #guard Float.quietNaN.toInt == 0
 
