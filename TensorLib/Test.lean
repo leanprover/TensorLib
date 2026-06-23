@@ -39,7 +39,8 @@ private def testTensorElementBV (dtype : Dtype) : IO Bool := do
 
 def runAllTests : IO Bool := do
   return (<- testTensorElementBV Dtype.uint16) &&
-         (<- testTensorElementBV Dtype.uint32)
+         (<- testTensorElementBV Dtype.uint32) &&
+         (<- testTensorElementBV Dtype.float16)
 
 end Test
 end TensorLib
