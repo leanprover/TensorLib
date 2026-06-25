@@ -107,17 +107,50 @@ def _root_.Float32.toFloat16Bits (f : Float32) : UInt16 :=
   let mant := bits &&& 0x7FFFFF
   let sign16 := sign.toUInt16 <<< 15
   if exp == 0 then sign16 -- 0 or subnormal float32 is 0 in float16
-  else if exp == 0xFF then sign16 ||| ((0x1F : UInt16) <<< 10) ||| (mant >>> 13).toUInt16 -- if Inf or NaN. 0x1F
+  else if exp == 0xFF then -- if Inf or NaN. 0x1F
+    if mant == 0 then
+      -- infinity
+      sign16 ||| ((0x1F : UInt16) <<< 10)
+    else
+      -- NaN : make sure mantissa is nonzero in fp16 to preserve NaN-ness
+      let truncMant := (mant >>> 13).toUInt16
+      let nanMant := if truncMant == 0 then (0x0200 : UInt16) else truncMant -- set quiet Nan bit if payload lost
+      sign16 ||| ((0x1f : UInt16) <<< 10) ||| nanMant
   else
     let newExp : Int := exp.toNat - 127 + 15 -- rebias from float32 to float16 bias
     if newExp >= 0x1F then sign16 ||| ((0x1F : UInt16) <<< 10) -- overflow -> inf
-    else if newExp <= 0 then sign16 -- underflow -> 0
-    else sign16 ||| (newExp.toNat.toUInt16 <<< 10) ||| (mant >>> 13).toUInt16
+    else if newExp <= 0 then -- underflow for subnormal in fp16
+        -- Work with full fp32 mantissa + implicit leading 1 bit
+        -- Total shift combines fp32 to fp16 mantissa narrowing (13) + subnormal adjustment (1-newExp)
+        let totalShift := (14 - newExp).toNat
+        let fullMant := mant ||| 0x800000  -- add implicit leading 1 at bit 23
+        -- Round-to-nearest-even on discarded bits
+        let roundBit := if totalShift > 0 then (fullMant >>> (totalShift.toUInt32 - 1)) &&& 1 else 0
+        let stickyMask := if totalShift > 1 then (1 <<< (totalShift.toUInt32 - 1)) - 1 else 0
+        let stickyBits := fullMant &&& stickyMask
+        let shifted := fullMant >>> totalShift.toUInt32
+        let rounded := if roundBit == 1 && (stickyBits != 0 || shifted &&& 1 == 1)
+          then shifted + 1
+          else shifted
+        sign16 ||| rounded.toUInt16
+    else
+      -- Round to nearest even
+      let truncated := mant >>> 13
+      let roundBit := (mant >>> 12) &&& 1 -- highest discarded bit
+      let stickyBits := mant &&& 0xFFF -- the 12 leftover bits
+      -- Round up if roundBit is 1 and either stickyBits nonzero or last kept bit is odd
+      let rounded := if roundBit == 1 && (stickyBits != 0 || truncated &&& 1 == 1) then truncated + 1 else truncated
+      -- Mantissa overflow ronding up 0x3FF to 0x400 means we need to bump the exp
+      let (finalExp, finalMant) := if rounded > 0x3FF
+        then (newExp.toNat.toUInt16 + 1, (0 : UInt16))
+        else (newExp.toNat.toUInt16, rounded.toUInt16)
+      -- pack it all into fp16 using rounded values instead of truncating
+      sign16 ||| (finalExp <<< 10) ||| finalMant
 
 
 -- Convert float16 bits (stored as UInt) to float32.
 -- Extract sign, exp, and mantissa from 16 bit representation
--- Check for zero, inf, NaN
+-- Check for zero, inf, NaN, or subnormal
 -- If number is none of the above then adjust bias (add 127 - 15)
 -- left shift mantissa 13
 -- pack it into 32 bit layout
@@ -125,11 +158,22 @@ def _root_.UInt16.toFloat32FromFloat16 (bits : UInt16) : Float32 :=
   let sign := (bits >>> 15) &&& 1  -- sign bit; positive = 0, negative = 1
   let exp := (bits >>> 10) &&& 0x1F -- extract bits 14..10
   let mant := bits &&& 0x3FF -- mantissa bits
-  if exp ==  0 && mant == 0 then
-    if sign == 1 then Float32.ofBits 0x80000000 -- -0
-    else Float32.ofBits 0  -- +0
-  else if exp == 0x1FF then -- exp is all 1's so this is either +-inf or NaN
-    if mant == 0 then Float32.ofBits (sign.toUInt32 <<< 32 ||| 0x7F800000) -- +- inf
+  if exp ==  0 then
+    -- Number can be either +-0 or subnormal
+    if mant == 0 then
+      -- All bits 0 in mantissa -> +-0
+      if sign == 1 then Float32.ofBits 0x80000000 else Float32.ofBits 0 -- +0
+    else
+      -- subnormal fp16 : exp is 0 but mant is != 0
+      -- value = (-1)^sign x mant x 2 ^ (-24)
+      let f := Float32.ofNat mant.toNat -- mant <= 1023 fits in fp32
+      let scale := Float32.ofBits 0x33800000 -- 2 ^ (-24) in fp32
+      let result := f * scale -- shift the exponent, no precision lost
+      -- Apply sign bit
+      if sign == 1 then Float32.ofBits (result.toBits ||| 0x80000000)
+      else result
+  else if exp == 0x1F then -- exp is all 1's so this is either +-inf or NaN
+    if mant == 0 then Float32.ofBits (sign.toUInt32 <<< 31 ||| 0x7F800000) -- +- inf
     else Float32.ofBits 0x7FC00000 -- Nan
   else
     -- Rebias the exponent from float16 (15) bias to float32 (127)
@@ -158,6 +202,23 @@ section Test
   let n := maxSafeNatForFloat64 + 1
   let f := n.toFloat
   f.toNat == n - 1
+
+-- fp16 round-trip. Decode UInt16 as fp16 → Float32 → encode back should give same bits.
+-- NaN payloads may not round-trip, so we allow f != f (NaN) as an alternative.
+/--
+info: Unable to find a counter-example
+---
+warning: declaration uses 'sorry'
+-/
+  #guard_msgs in
+  example (bits : UInt16) :
+    let f := bits.toFloat32FromFloat16
+    f.toFloat16Bits == bits ∨ f != f := by plausible
+
+--fp32 0.00005 is subnormal in fp16
+-- Numpy encodes it as bits 839 tested using:
+-- python3 -c "import numpy as np; x = np.float16(0.00005); print(x, x.view(np.uint16))"
+#guard (Float32.ofNat 5 / Float32.ofNat 100000).toFloat16Bits == (839 : UInt16)
 
 end Test
 

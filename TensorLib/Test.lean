@@ -37,10 +37,64 @@ private def testTensorElementBV (dtype : Dtype) : IO Bool := do
   let expected := (Tensor.arange! dtype 20).reshape! (Shape.mk [5, 4])
   return Tensor.arrayEqual expected arr
 
+-- fp16 edge cases decode corrctly after loading from npy
+-- Each value is input as fp16 bytes, decided to fp32, and compared against expected
+private def testFloat16EdgeCases : IO Bool := do
+    let file <- saveNumpyArray "np.array([65504.0, 0.1, -0.0, np.inf, -np.inf, np.nan, 2048.5, 100.5, 0.00005], dtype='float16')"
+    let npy <- Npy.parseFile file
+    let arr <- IO.ofExcept (Tensor.ofNpy npy)
+    let _ <- IO.FS.removeFile file
+    -- decode a 2 byte fp16 value at index x 2 since each fp16 is 2 bytes
+    let decode (offset : Nat) : Err Float32 :=
+      Dtype.byteArrayToFloat16 .float16 (arr.data.extract offset (offset + 2))
+    let posInf := Float32.ofBits 0x7F800000
+    let negInf := Float32.ofBits 0xFF800000
+    -- max in fp16
+    let v0 <- IO.ofExcept (decode 0)
+    let c0 := v0 == 65504.0
+    IO.println s!"v0 (65504): {v0 == 65504.0}"
+    -- 0.1 cant be exact so check approx
+    let v1 <- IO.ofExcept (decode 2)
+    let diff := v1 - 0.1
+    let c1 := diff < 0.002 && diff > -0.002
+    IO.println s!"v1 (0.1): {c1}"
+    -- IEE754 -0.0 == 0.0
+    let v2 <- IO.ofExcept (decode 4)
+    let c2 := v2 == 0.0
+    IO.println s!"v2 (-0): {c2}"
+    -- +inf, -inf
+    let v3 <- IO.ofExcept (decode 6)
+    let c3 := v3 == posInf
+    IO.println s!"v3 (inf): {c3}"
+    let v4 <- IO.ofExcept (decode 8)
+    let c4 := v4 == negInf
+    IO.println s!"v4 (-inf): {c4}"
+    -- nan != nan
+    let v5 <- IO.ofExcept (decode 10)
+    let c5 := v5 != v5
+    IO.println s!"v5 (nan): {c5}"
+    -- 2048.5 rounds to 2048 in fp16 npy (step size is 2)
+    let v6 <- IO.ofExcept (decode 12)
+    IO.println s!"v6 actual: {v6}"
+    let c6 := v6 == 2048
+    IO.println s!"v6 (2048.5 rounds to 2048): {c6}"
+    -- 100.5 fits in fp16
+    let v7 <- IO.ofExcept (decode 14)
+    let c7 := v7 == 100.5
+    IO.println s!"v7 (100.5) : {c7}"
+    -- subnormals rounding
+    let v8 <- IO.ofExcept (decode 16)
+    let diff8 := v8 - 0.00005
+    let c8 :=  diff8 < 0.000001 && diff8 > -0.000001
+    IO.println s!"v8 (subnormal 0.00005): {c8}, actual: {v8}"
+    return c0 && c1 && c2 && c3 && c4 && c5 && c6 && c7 && c8
+
+
+
 def runAllTests : IO Bool := do
-  return (<- testTensorElementBV Dtype.uint16) &&
-         (<- testTensorElementBV Dtype.uint32) &&
-         (<- testTensorElementBV Dtype.float16)
+ return (<- testTensorElementBV Dtype.uint16) &&
+        (<- testTensorElementBV Dtype.uint32) &&
+        (<- testFloat16EdgeCases)
 
 end Test
 end TensorLib

@@ -64,7 +64,7 @@ example (x y : Nat) :
 
 local instance : SampleableExt (Nat × Nat) :=
   SampleableExt.mkSelfContained do
-    let x ← SampleableExt.interpSample Nat
+    let x <- SampleableExt.interpSample Nat
     let n <- SampleableExt.interpSample Nat
     return (x * n, x)
 
