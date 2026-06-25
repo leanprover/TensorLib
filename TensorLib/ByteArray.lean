@@ -241,7 +241,7 @@ private local instance : Shrinkable ByteArray where
 
 private local instance : SampleableExt ByteArray :=
   SampleableExt.mkSelfContained do
-    let data ← SampleableExt.interpSample (Array UInt8)
+    let data <- SampleableExt.interpSample (Array UInt8)
     return ByteArray.mk data
 
 /--

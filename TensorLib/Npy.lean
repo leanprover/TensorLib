@@ -107,8 +107,8 @@ def dtypeNameToNpyString (t : TensorLib.Dtype) : String := match t with
 | .int64 => "i8"
 | .uint8 => "u1"
 | .uint16 => "u2"
-| .uint32 => "u3"
-| .uint64 => "u4"
+| .uint32 => "u4"
+| .uint64 => "u8"
 | .float16 => "f2"
 | .float32 => "f4"
 | .float64 => "f8"
@@ -228,7 +228,7 @@ private def ignore (p : PState T) : PState Unit := do
 -- values like the dtypes
 private def parseToken : PState String := do
   whitespace
-  let s ← get
+  let s <- get
   let mut token := ""
   for i in [s.index : s.headerEnd] do
     let b := s.source.get! i
