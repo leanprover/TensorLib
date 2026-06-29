@@ -123,16 +123,19 @@ def _root_.Float32.toFloat16Bits (f : Float32) : UInt16 :=
         -- Work with full fp32 mantissa + implicit leading 1 bit
         -- Total shift combines fp32 to fp16 mantissa narrowing (13) + subnormal adjustment (1-newExp)
         let totalShift := (14 - newExp).toNat
-        let fullMant := mant ||| 0x800000  -- add implicit leading 1 at bit 23
-        -- Round-to-nearest-even on discarded bits
-        let roundBit := if totalShift > 0 then (fullMant >>> (totalShift.toUInt32 - 1)) &&& 1 else 0
-        let stickyMask := if totalShift > 1 then (1 <<< (totalShift.toUInt32 - 1)) - 1 else 0
-        let stickyBits := fullMant &&& stickyMask
-        let shifted := fullMant >>> totalShift.toUInt32
-        let rounded := if roundBit == 1 && (stickyBits != 0 || shifted &&& 1 == 1)
-          then shifted + 1
-          else shifted
-        sign16 ||| rounded.toUInt16
+        -- If shift >= 25, all 24 significant bits are gone -> value should be ±zero
+        if totalShift >= 25 then sign16
+        else
+          let fullMant := mant ||| 0x800000  -- add implicit leading 1 at bit 23
+          -- Round-to-nearest-even on discarded bits
+          let roundBit := if totalShift > 0 then (fullMant >>> (totalShift.toUInt32 - 1)) &&& 1 else 0
+          let stickyMask := if totalShift > 1 then (1 <<< (totalShift.toUInt32 - 1)) - 1 else 0
+          let stickyBits := fullMant &&& stickyMask
+          let shifted := fullMant >>> totalShift.toUInt32
+          let rounded := if roundBit == 1 && (stickyBits != 0 || shifted &&& 1 == 1)
+            then shifted + 1
+            else shifted
+          sign16 ||| rounded.toUInt16
     else
       -- Round to nearest even
       let truncated := mant >>> 13
@@ -174,7 +177,8 @@ def _root_.UInt16.toFloat32FromFloat16 (bits : UInt16) : Float32 :=
       else result
   else if exp == 0x1F then -- exp is all 1's so this is either +-inf or NaN
     if mant == 0 then Float32.ofBits (sign.toUInt32 <<< 31 ||| 0x7F800000) -- +- inf
-    else Float32.ofBits 0x7FC00000 -- Nan
+    -- puts the original sign bit at position 31, so negative fp16 NaN stays negative in fp32.
+     else Float32.ofBits (sign.toUInt32 <<< 31 ||| 0x7FC00000) -- NaN
   else
     -- Rebias the exponent from float16 (15) bias to float32 (127)
     -- shift mant from 10 bits to 23 bits so pad with 13 0's
