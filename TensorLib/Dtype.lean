@@ -117,7 +117,6 @@ def join (x y : Dtype) : Option Dtype :=
   let (x, y) := if x.itemsize <= y.itemsize then (x, y) else (y, x)
   if x == y then x else
   match x, y with
-  | float16, float16 => float16
   | float16, float32 => float32
   | float16, float64 => float64
   | float16, int16 => float32
@@ -126,12 +125,8 @@ def join (x y : Dtype) : Option Dtype :=
   | float16, uint32 => float64
   | float16, int64 => float64
   | float16, uint64 => float64
-  | float16, bool => float16
-  | int8, float16 => float16
-  | float16, int8 => float16
-  | uint8, float16 => float16
-  | float16, uint8 => float16
   | float32, float64 => float64
+  | float16, _ => float16 -- for all other cases that promote to fp16
   | float32, _
   | _, float32
   | float64, _
@@ -361,8 +356,6 @@ def byteArrayOfFloat16 (dtype : Dtype) (f : Float32) : Err ByteArray :=
   if dtype == .float16 then .ok (toLEByteArray f.toFloat16Bits)
   else .error "Illegal type conversion"
 
-private def byteArrayOfFloat16! (dtype : Dtype) (f : Float32) : ByteArray := get! $ byteArrayOfFloat16 dtype f
-
 private def byteArrayToFloat64RoundTrip (dtype : Dtype) (f : Float) : Bool :=
   let res := do
     let arr <- dtype.byteArrayOfFloat64 f
@@ -402,7 +395,6 @@ def byteArrayToFloat16 (dtype : Dtype)(arr : ByteArray) : Err Float32 := match d
   | .float16 => arr.toUInt16LE.map UInt16.toFloat32FromFloat16
   | _ => .error "Illegal type conversion"
 
-def byteArrayToFloat16! (dtype : Dtype) (arr : ByteArray) : Float32 := get! $ byteArrayToFloat16 dtype arr
 
 
 private def byteArrayToFloat16RoundTrip (dtype : Dtype) (f : Float32) : Bool :=
@@ -418,12 +410,6 @@ private def byteArrayToFloat16RoundTrip (dtype : Dtype) (f : Float32) : Bool :=
 #guard float16.byteArrayToFloat16RoundTrip 42
 #guard float16.byteArrayToFloat16RoundTrip (-0)
 
-
--- Read 2 bytes as fp16, convert to fp32
--- perform arithmetic computations since lean doesnt have native fp16 and finally downcast to fp16 to store result
-def byteArrayToFloat16AsFloat32 (arr : ByteArray) : Err Float32 := do
-  let bits <- arr.toUInt16LE -- Read 2 bytes as UInt16 in little Endian
-  return bits.toFloat32FromFloat16
 
 -- Add produces the IEEE754 result because fp32 (p=24) satisfies the innocuous double rounding condition (theoreom 20)
 -- https://hal.science/hal-01091186v1/document
@@ -562,7 +548,7 @@ def isZero (dtype : Dtype) (x : ByteArray) : Err Bool := match dtype with
 | uint64 => return x.data.all fun v => v == 0
 -- We need to worry about -0, which is not all 0s in the bit pattern.
 | float16 => do
-  let f <- byteArrayToFloat16AsFloat32 x
+  let f <- Dtype.byteArrayToFloat16 .float16 x
   return f == 0
 | float32 => do
   let f <- Float32.ofLEByteArray x
@@ -605,17 +591,17 @@ def castOverflow (fromDtype : Dtype) (data : ByteArray) (toDtype : Dtype) : Err 
     return toLEByteArray f.toFloat
    -- float16 to integer types: change to float32, then convert to int/nat
   | .float16, .uint8 | .float16, .uint16 | .float16, .uint32 | .float16, .uint64 => do
-    let f <- byteArrayToFloat16AsFloat32 data
+    let f <- Dtype.byteArrayToFloat16 .float16 data
     return toDtype.byteArrayOfNatOverflow f.toNat
   | .float16, .int8 | .float16, .int16 | .float16, .int32 | .float16, .int64 => do
-    let f <- byteArrayToFloat16AsFloat32 data
+    let f <- Dtype.byteArrayToFloat16 .float16 data
     return toDtype.byteArrayOfIntOverflow f.toInt
   -- float16 to float32/float64: decode to float32, then widen if needed
   | .float16, .float32 => do
-    let f <- byteArrayToFloat16AsFloat32 data
+    let f <- Dtype.byteArrayToFloat16 .float16 data
     return toLEByteArray f
   | .float16, .float64 => do
-    let f <- byteArrayToFloat16AsFloat32 data
+    let f <- Dtype.byteArrayToFloat16 .float16 data
     return toLEByteArray f.toFloat
   -- float32/float64 → float16: decode, then downcast to float16 bits
   | .float32, .float16 => do
@@ -988,8 +974,10 @@ warning: declaration uses 'sorry'
 #guard_msgs in
 -- Lossless translations should be OK
 example (fromDtype toDtype : Dtype) (n : Nat) :
+-- only try values within fromDtye's representable range
+-- fp16 max n = 2^11, fp32 max n = 2^24, fp64 = 2^53, uint8 = 255, int8 = 127, etc
   if lossless fromDtype toDtype then
-    canCastLosslessIntRoundTrip fromDtype n toDtype
+    if n > fromDtype.maxSafeNat.getD n then true else canCastLosslessIntRoundTrip fromDtype n toDtype
   else true := by plausible
 
 
@@ -1018,7 +1006,8 @@ example (a : UInt16) :
   let zero := toLEByteArray (0 : UInt16)
   let f := a.toFloat32FromFloat16
    -- f != f is true only for NaN; check identity for everything else
-  f != f ∨ Dtype.add .float16 xa zero == .ok xa := by plausible
+   -- if value is +-0 skip byte equality check since addition is identity upto sign
+  f != f ∨ f == 0 ∨ Dtype.add .float16 xa zero == .ok xa := by plausible
 
 
 #guard Dtype.uint8.leftShift! (ByteArray.mk #[10]) (ByteArray.mk #[1]) == ByteArray.mk #[20]

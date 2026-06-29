@@ -38,9 +38,9 @@ private def testTensorElementBV (dtype : Dtype) : IO Bool := do
   return Tensor.arrayEqual expected arr
 
 -- fp16 edge cases decode corrctly after loading from npy
--- Each value is input as fp16 bytes, decided to fp32, and compared against expected
+-- Each value is input as fp16 bytes, decoded to fp32, and compared against expected
 private def testFloat16EdgeCases : IO Bool := do
-    let file <- saveNumpyArray "np.array([65504.0, 0.1, -0.0, np.inf, -np.inf, np.nan, 2048.5, 100.5, 0.00005], dtype='float16')"
+    let file <- saveNumpyArray "np.array([65504.0, 0.1, -0.0, np.inf, -np.inf, np.nan, 2048.5, 100.5, 0.00005, 1.16e-10, 1e-20, -1e-20, 1e-40], dtype='float16')"
     let npy <- Npy.parseFile file
     let arr <- IO.ofExcept (Tensor.ofNpy npy)
     let _ <- IO.FS.removeFile file
@@ -87,7 +87,21 @@ private def testFloat16EdgeCases : IO Bool := do
     let diff8 := v8 - 0.00005
     let c8 :=  diff8 < 0.000001 && diff8 > -0.000001
     IO.println s!"v8 (subnormal 0.00005): {c8}, actual: {v8}"
-    return c0 && c1 && c2 && c3 && c4 && c5 && c6 && c7 && c8
+    -- below fp16 minimum subnormal so should be 0
+    let v9 <- IO.ofExcept (decode 18)
+    let c9 := v9 == 0.0
+    IO.println s!"v9 (1.16e-10 -> 0): {c9}"
+    -- more values below fp16 min subnormal → zero
+    let v10 <- IO.ofExcept (decode 20)
+    let c10 := v10 == 0.0
+    IO.println s!"v10 (1e-20 -> 0): {c10}"
+    let v11 <- IO.ofExcept (decode 22)
+    let c11 := v11 == 0.0  -- -0.0 == 0.0 per IEEE 754
+    IO.println s!"v11 (-1e-20 -> -0): {c11}"
+    let v12 <- IO.ofExcept (decode 24)
+    let c12 := v12 == 0.0
+    IO.println s!"v12 (1e-40 -> 0): {c12}"
+    return c0 && c1 && c2 && c3 && c4 && c5 && c6 && c7 && c8 && c9 && c10 && c11 && c12
 
 
 
