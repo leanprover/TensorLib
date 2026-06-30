@@ -39,7 +39,7 @@ inductive Dtype where
 | float16
 | float32
 | float64
-deriving BEq, Repr, Inhabited
+deriving BEq, Repr, Inhabited, DecidableEq
 
 
 namespace Dtype
@@ -111,42 +111,46 @@ def itemsize (x : Dtype) : Nat := match x with
 | float16 | int16 | uint16 => 2
 | bool | int8 | uint8 => 1
 
+
 -- This is the type NumPy returns when using binary operators on arrays
 -- with the given types. E.g. uint16 and int16 returns an int32.
 def join (x y : Dtype) : Option Dtype :=
-  let (x, y) := if x.itemsize <= y.itemsize then (x, y) else (y, x)
-  if x == y then x else
-  match x, y with
-  | float16, float32 => float32
-  | float16, float64 => float64
-  | float16, int16 => float32
-  | float16, uint16 => float32
-  | float16, int32 => float64
-  | float16, uint32 => float64
-  | float16, int64 => float64
-  | float16, uint64 => float64
-  | float32, float64 => float64
-  | float16, _ => float16 -- for all other cases that promote to fp16
-  | float32, _
-  | _, float32
-  | float64, _
-  | _, float64 => none
-  | bool, _ => y
-  | int8, uint8
-  | uint8, int8 => int16
-  | int8, _
-  | uint8, _ => y
-  | int16, uint16
-  | uint16, int16 => int32
-  | int16, _
-  | uint16, _ => y
-  | int32, uint32
-  | uint32, int32 => int64
-  | int32, _
-  | uint32, _ => y
-  | int64, _
-  | _, int64
-  | uint64, _ => none -- NumPy gives "can't safely coerce" for uint64/int64
+    if _ : x = y then x
+    -- if x is bigger swap and recurse
+    else if _ : x.itemsize > y.itemsize then join y x
+    -- here compiler knows that x != y AND x.size <= y.size
+    -- impossible cases are pruned
+    else
+      match x, y with
+      | .float16, .float32 => float32
+      | .float16, .float64 => float64
+      | .float16, .int16 => float32
+      | .float16, .uint16 => float32
+      | .float16, .int32 => float64
+      | .float16, .uint32 => float64
+      | .float16, .int64 => float64
+      | .float16, .uint64 => float64
+      | .float32, .float64 => float64
+      | .float32, _
+      | _, .float32 => none
+      | .float64, _
+      | _, .float64 => none
+      | .bool, _ => y
+      | .int8, .uint8
+      | .uint8, .int8 => int16
+      | .int8, _
+      | .uint8, _ => y
+      | .int16, .uint16
+      | .uint16, .int16 => int32
+      | .int16, _
+      | .uint16, _ => y
+      | .int32, .uint32
+      | .uint32, .int32 => int64
+      | .int32, _
+      | .uint32, _ => y
+      | .int64, _
+      | _, .int64
+      | .uint64, _ => none
 
 -- Can we cast from one dtype to another without losing information
 def lossless (fromDtype toDtype : Dtype) : Bool := match fromDtype, toDtype with
@@ -963,8 +967,9 @@ warning: declaration uses 'sorry'
 -/
 #guard_msgs in
 -- One dtype should always go back and forth
+-- skip values outside dtypes range since they cannot be encoded in the first place.
 example (dtype : Dtype) (n : Nat) :
-  canCastLosslessIntRoundTrip dtype n dtype := by plausible
+  if n > dtype.maxSafeNat.getD n then true else canCastLosslessIntRoundTrip dtype n dtype := by plausible
 
 /--
 info: Unable to find a counter-example
