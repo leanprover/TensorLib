@@ -103,9 +103,9 @@ def isUint (x : Dtype) : Bool := match x with
 
 def isIntLike (x : Dtype) : Bool := x.isInt || x.isUint
 
--- Added float16 so bitwise op know to reject it
+-- Added float16 and bfloat16 so bitwise op know to reject it
 def isFloat (x : Dtype) : Bool := match x with
-| .float16 | .float32 | .float64 => true
+| .float16 | .bfloat16 | .float32 | .float64 => true
 | _ => false
 
 --! Number of bytes used by each element of the given dtype
@@ -151,7 +151,13 @@ def join (x y : Dtype) : Option Dtype :=
       | .uint8, _ => y
       | .int16, .uint16
       | .uint16, .int16 => int32
+      -- cannot promote
+      -- python3 -c "import ml_dtypes as m; import numpy as np; print(np.result_type(np.int16, m.bfloat16))"
+      | .int16, .bfloat16 => none
       | .int16, _
+      -- cannot promote
+      -- python3 -c "import ml_dtypes as m; import numpy as np; print(np.result_type( np.int16, m.bfloat16))"
+      | .uint16, .bfloat16 => none
       | .uint16, _ => y
       | .int32, .uint32
       | .uint32, .int32 => int64
@@ -457,6 +463,17 @@ private def byteArrayToBFloat16RoundTrip (dtype : Dtype) (f : Float32) : Bool :=
 #guard bfloat16.byteArrayToBFloat16RoundTrip (-0)
 #guard bfloat16.byteArrayToBFloat16RoundTrip 256
 
+-- helper functions for fp16 and bf16 arithmetic to reduce duplicate code
+private def decodeFloat16OrBFloat16 (dtype : Dtype) (arr : ByteArray) : Err Float32 := match dtype with
+  | .float16 => dtype.byteArrayToFloat16 arr
+  | .bfloat16 => dtype.byteArrayToBFloat16 arr
+  | _ => .error "decoder: expected float16 or bfloat16"
+
+private def encodeFloat16OrBFloat16 (dtype : Dtype) (f : Float32) : Err ByteArray := match dtype with
+  | .float16 => dtype.byteArrayOfFloat16 f
+  | .bfloat16 => dtype.byteArrayOfBFloat16 f
+  | _ => .error "encoder: expected float16 or bfloat16"
+
 
 -- Add produces the IEEE754 result because fp32 (p=24) satisfies the innocuous double rounding condition (theoreom 20)
 -- https://hal.science/hal-01091186v1/document
@@ -476,14 +493,11 @@ def add (dtype : Dtype) (x y : ByteArray) : Err ByteArray :=
     return dtype.byteArrayOfNatOverflow (x.toNat + y.toNat)
   | .int8 | .int16| .int32 | .int64 => do
     dtype.byteArrayOfInt (x.toInt + y.toInt)
-  | .float16 => do -- read inputs as fp32
-    let x <- dtype.byteArrayToFloat16 x
-    let y <- dtype.byteArrayToFloat16 y
-    dtype.byteArrayOfFloat16 (x + y)
+  | .float16
   | .bfloat16 => do
-    let x <- dtype.byteArrayToBFloat16 x
-    let y <- dtype.byteArrayToBFloat16 y
-    dtype.byteArrayOfBFloat16 (x + y)
+    let x <- dtype.decodeFloat16OrBFloat16 x
+    let y <- dtype.decodeFloat16OrBFloat16 y
+    dtype.encodeFloat16OrBFloat16 (x + y)
   | .float32 => do
     let x <- dtype.byteArrayToFloat32 x
     let y <- dtype.byteArrayToFloat32 y
@@ -502,14 +516,11 @@ def sub (dtype : Dtype) (x y : ByteArray) : Err ByteArray :=
     return dtype.byteArrayOfNatOverflow (x.toNat - y.toNat)
   | .int8 | .int16| .int32 | .int64 => do
     return dtype.byteArrayOfIntOverflow (x.toInt - y.toInt)
-  | .float16 => do
-    let x <- dtype.byteArrayToFloat16 x
-    let y <- dtype.byteArrayToFloat16 y
-    dtype.byteArrayOfFloat16 (x - y)
+  | .float16
   | .bfloat16 => do
-    let x <- dtype.byteArrayToBFloat16 x
-    let y <- dtype.byteArrayToBFloat16 y
-    dtype.byteArrayOfBFloat16 (x - y)
+    let x <- dtype.decodeFloat16OrBFloat16 x
+    let y <- dtype.decodeFloat16OrBFloat16 y
+    dtype.encodeFloat16OrBFloat16 (x - y)
   | .float32 => do
     let x <- dtype.byteArrayToFloat32 x
     let y <- dtype.byteArrayToFloat32 y
@@ -529,14 +540,11 @@ def mul (dtype : Dtype) (x y : ByteArray) : Err ByteArray :=
     return dtype.byteArrayOfNatOverflow (x.toNat * y.toNat)
   | .int8 | .int16| .int32 | .int64 => do
     return dtype.byteArrayOfIntOverflow (x.toInt * y.toInt)
-  | .float16 => do
-    let x <- dtype.byteArrayToFloat16 x
-    let y <- dtype.byteArrayToFloat16 y
-    dtype.byteArrayOfFloat16 (x * y)
+  | .float16
   | .bfloat16 => do
-    let x <- dtype.byteArrayToBFloat16 x
-    let y <- dtype.byteArrayToBFloat16 y
-    dtype.byteArrayOfBFloat16 (x * y)
+    let x <- dtype.decodeFloat16OrBFloat16 x
+    let y <- dtype.decodeFloat16OrBFloat16 y
+    dtype.encodeFloat16OrBFloat16 (x * y)
   | .float32 => do
     let x <- dtype.byteArrayToFloat32 x
     let y <- dtype.byteArrayToFloat32 y
@@ -556,14 +564,11 @@ def div (dtype : Dtype) (x y : ByteArray) : Err ByteArray :=
     return dtype.byteArrayOfNatOverflow (x.toNat / y.toNat)
   | .int8 | .int16| .int32 | .int64 => do
     return dtype.byteArrayOfIntOverflow (x.toInt / y.toInt)
-  | .float16 => do
-    let x <- dtype.byteArrayToFloat16 x
-    let y <- dtype.byteArrayToFloat16 y
-    dtype.byteArrayOfFloat16 (x / y)
+  | .float16
   | .bfloat16 => do
-    let x <- dtype.byteArrayToBFloat16 x
-    let y <- dtype.byteArrayToBFloat16 y
-    dtype.byteArrayOfBFloat16 (x / y)
+    let x <- dtype.decodeFloat16OrBFloat16 x
+    let y <- dtype.decodeFloat16OrBFloat16 y
+    dtype.encodeFloat16OrBFloat16 (x / y)
   | .float32 => do
     let x <- dtype.byteArrayToFloat32 x
     let y <- dtype.byteArrayToFloat32 y
@@ -585,12 +590,10 @@ def abs (dtype : Dtype) (x : ByteArray) : Err ByteArray := do
   match dtype with
   | .uint8 | .uint16 | .uint32 | .uint64 => return x
   | .int8 | .int16| .int32 | .int64 => return dtype.byteArrayOfIntOverflow x.toInt.natAbs
-  | .float16 => do
-    let x <- dtype.byteArrayToFloat16 x
-    dtype.byteArrayOfFloat16 x.abs
+  | .float16
   | .bfloat16 => do
-    let x <- dtype.byteArrayToBFloat16 x
-    dtype.byteArrayOfBFloat16 x.abs
+    let x <- dtype.decodeFloat16OrBFloat16 x
+    dtype.encodeFloat16OrBFloat16 x.abs
   | .float32 =>
     let x <- dtype.byteArrayToFloat32 x
     dtype.byteArrayOfFloat32 x.abs
@@ -769,6 +772,7 @@ in NumPy out of the box.
 -/
 def floatVariant (dtype : Dtype) : Dtype :=
   if dtype == .float16 then .float16 -- float16 should stay float16
+  else if dtype == .bfloat16 then .bfloat16
   else if dtype == .float32 then .float32
   else if dtype == .float64 then .float64
   else if dtype.itemsize <= 2 then .float32 -- int8/uint8/int16/uint16
