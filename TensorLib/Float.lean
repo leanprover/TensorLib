@@ -154,12 +154,12 @@ def _root_.Float32.toFloat16Bits (f : Float32) : UInt16 :=
 
 -- Convert float32 to BFloat16
 -- bf16 is the top 16 bits of fp32 with round to nearest even on the discarded bits
--- no exponent rebiasing needed since its equal to fp32's
+-- no exponent rebiasing needed since it's equal to fp32's
 -- Subnormals are taken care of since bf16 sub = fp32 sub, same exponent range
 -- Sign is preserved  in normal values
 -- NaN sign is not preserved because Lean's fp32 type normalizes NaN to +NaN irrespective of input sign.
--- This matches ml_dtypoe's bfloat16 constructor behavior
-def _root_.Float32.toBFloat16Bits (f: Float32) : UInt16 :=
+-- This matches ml_dtype's bfloat16 constructor behavior
+def _root_.Float32.toBFloat16Bits (f : Float32) : UInt16 :=
   let bits := f.toBits
   let top := bits >>> 16 -- top 16 bits
   -- bit 15 determines if we are >= 0.5 ULP
@@ -276,18 +276,17 @@ warning: declaration uses 'sorry'
 #guard (Float32.ofBits 0x7F7FFFFF).toBFloat16Bits == (32640 : UInt16)
 
 
--- Property: bf16 round-trip. Encode UInt16 as bf16 → decode to Float32 -> encode back.
+-- Property: bf16 round-trip. Encode UInt16 as bf16 -> decode to Float32 -> encode back.
 -- Should give same bits (NaN may not round-trip via ==).
 /--
 info: Unable to find a counter-example
 ---
 warning: declaration uses 'sorry'
 -/
-  #guard_msgs in
-   example (bits : UInt16) :
+#guard_msgs in
+  example (bits : UInt16) :
     let f := bits.toFloat32FromBFloat16
     f.toBFloat16Bits == bits ∨ f != f := by plausible
-
 end Test
 
 end TensorLib

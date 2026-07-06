@@ -84,6 +84,7 @@ namespace Dtype
 Parse a numpy dtype. The first character represents the
 byte order: https://numpy.org/doc/2.1/reference/generated/numpy.dtype.byteorder.html
 -/
+-- note: npy has no standard description strng; ml_dtypes/JAX/TensorFlow use V2
 def dtypeNameFromNpyString (s : String) : Err TensorLib.Dtype := match s with
 | "b1" => .ok .bool
 | "i1" => .ok .int8
@@ -95,7 +96,6 @@ def dtypeNameFromNpyString (s : String) : Err TensorLib.Dtype := match s with
 | "u4" => .ok .uint32
 | "u8" => .ok .uint64
 | "f2" => .ok .float16
-| "V2" => .ok .bfloat16 -- note: npy has no standard description string; ml_dtypes/JAX/TensorFlow use V2
 | "f4" => .ok .float32
 | "f8" => .ok .float64
 | _ => .error s!"Can't parse {s} as a dtype"
@@ -119,7 +119,10 @@ def fromNpyString (s : String) : Err Dtype :=
   if s.length == 0 then .error "Empty dtype string" else
   do
     let order <- ByteOrder.fromChar (s.get 0)
-    let name <- dtypeNameFromNpyString (s.drop 1)
+    let nameStr := s.drop 1
+    -- bf16 stored as "<V2" by ml_dtypes; "| V2" is actual void data
+    let name <- if nameStr == "V2" && order == .littleEndian then .ok .bfloat16
+      else dtypeNameFromNpyString nameStr
     return { name, order }
 
 def toNpyString (t : Dtype) : String := t.order.toChar.toString.append (dtypeNameToNpyString t.name)
