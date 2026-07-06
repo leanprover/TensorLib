@@ -33,11 +33,13 @@ https://en.wikipedia.org/wiki/Double-precision_floating-point_format
 private def float32MantissaBits : Nat := 23
 private def float64MantissaBits : Nat := 52
 private def float16MantissaBits : Nat := 10
+private def bfloat16MantissaBits : Nat := 7
 
 -- Add 1 to the mantissa length because of the implicit leading 1
 def maxSafeNatForFloat32 : Nat := Nat.pow 2 (float32MantissaBits + 1)
 def maxSafeNatForFloat64 : Nat := Nat.pow 2 (float64MantissaBits + 1)
 def maxSafeNatForFloat16 : Nat := Nat.pow 2 (float16MantissaBits + 1)
+def maxSafeNatForBFloat16 : Nat := Nat.pow 2 (bfloat16MantissaBits + 1)
 
 def _root_.Float32.minValue : Float32 := Float32.ofBits 0xFF7FFFFF
 def _root_.Float32.maxValue : Float32 := Float32.ofBits 0x7F7FFFFF
@@ -150,6 +152,27 @@ def _root_.Float32.toFloat16Bits (f : Float32) : UInt16 :=
       -- pack it all into fp16 using rounded values instead of truncating
       sign16 ||| (finalExp <<< 10) ||| finalMant
 
+-- Convert float32 to BFloat16
+-- bf16 is the top 16 bits of fp32 with round to nearest even on the discarded bits
+-- no exponent rebiasing needed since its equal to fp32's
+-- Subnormals are taken care of since bf16 sub = fp32 sub, same exponent range
+-- Sign is preserved  in normal values
+-- NaN sign is not preserved because Lean's fp32 type normalizes NaN to +NaN irrespective of input sign.
+-- This matches ml_dtypoe's bfloat16 constructor behavior
+def _root_.Float32.toBFloat16Bits (f: Float32) : UInt16 :=
+  let bits := f.toBits
+  let top := bits >>> 16 -- top 16 bits
+  -- bit 15 determines if we are >= 0.5 ULP
+  let roundBit := (bits >>> 15) &&& 1
+  -- If any remainder bits are non zero we are > 0.5 ULP
+  let stickyBits := bits &&& 0x7FFF
+  -- Round to nearest even
+  -- round up if discarded part >= 0.5 ULP and last kept bit is odd
+  let rounded := if roundBit == 1 && (stickyBits != 0 || top &&& 1 == 1) then top + 1 else top
+  -- truncate to bf16 representation
+  rounded.toUInt16
+
+
 
 -- Convert float16 bits (stored as UInt) to float32.
 -- Extract sign, exp, and mantissa from 16 bit representation
@@ -185,7 +208,16 @@ def _root_.UInt16.toFloat32FromFloat16 (bits : UInt16) : Float32 :=
     let newExp := exp.toUInt32 - 15 + 127
     Float32.ofBits (sign.toUInt32 <<< 31 ||| newExp <<< 23 ||| mant.toUInt32 <<< 13)
 
+
 #guard Float.quietNaN.toInt == 0
+
+-- Convert bfloat16 bits (UInt16) to fp32
+-- bf16 is the top 16 bits of fp32 so shift left by 16
+-- subnormals: padded bit pattern is valid fp32 subnorm
+-- sign bit: preserved
+-- inf/NaN is handled automatically since all 1's in exp stays valid after padding
+def _root_.UInt16.toFloat32FromBFloat16 (bits : UInt16) : Float32 :=
+  Float32.ofBits (bits.toUInt32 <<< 16)
 
 section Test
 
@@ -223,6 +255,38 @@ warning: declaration uses 'sorry'
 -- Numpy encodes it as bits 839 tested using:
 -- python3 -c "import numpy as np; x = np.float16(0.00005); print(x, x.view(np.uint16))"
 #guard (Float32.ofNat 5 / Float32.ofNat 100000).toFloat16Bits == (839 : UInt16)
+
+-- bf16 subnormal: fp32 1e-40 (0x000116C2) encodes to bf16 bits 1 (verified with ml_dtypes)
+#guard (Float32.ofBits 0x000116C2).toBFloat16Bits == (1 : UInt16)
+-- bf16 encoding for Nats
+#guard (Float32.ofNat 42).toBFloat16Bits == (16936 : UInt16)
+-- max safe int for bf16
+#guard (Float32.ofNat 256).toBFloat16Bits == (17280 : UInt16)
+-- bf16 rounding: 0.1 requires round-to-nearest-even
+#guard (Float32.ofNat 1 / Float32.ofNat 10).toBFloat16Bits == (15821 : UInt16)
+
+-- bf16 round-trip: encode then decode should give original value
+#guard (16936 : UInt16).toFloat32FromBFloat16 == Float32.ofNat 42
+
+-- bf16 negative value: -42 encodes to 49704, decodes back to -42.0
+#guard (49704 : UInt16).toFloat32FromBFloat16 == Float32.ofBits 0xC2280000
+-- bf16 subnormal decode: bits 1 pads with zeros to fp32
+#guard (1 : UInt16).toFloat32FromBFloat16 == Float32.ofBits 0x00010000
+-- bf16 overflow: max fp32 rounds up to infinity (verified with ml_dtypes)
+#guard (Float32.ofBits 0x7F7FFFFF).toBFloat16Bits == (32640 : UInt16)
+
+
+-- Property: bf16 round-trip. Encode UInt16 as bf16 → decode to Float32 -> encode back.
+-- Should give same bits (NaN may not round-trip via ==).
+/--
+info: Unable to find a counter-example
+---
+warning: declaration uses 'sorry'
+-/
+  #guard_msgs in
+   example (bits : UInt16) :
+    let f := bits.toFloat32FromBFloat16
+    f.toBFloat16Bits == bits ∨ f != f := by plausible
 
 end Test
 

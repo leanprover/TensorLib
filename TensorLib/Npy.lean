@@ -95,6 +95,7 @@ def dtypeNameFromNpyString (s : String) : Err TensorLib.Dtype := match s with
 | "u4" => .ok .uint32
 | "u8" => .ok .uint64
 | "f2" => .ok .float16
+| "V2" => .ok .bfloat16 -- note: npy has no standard description string; ml_dtypes/JAX/TensorFlow use V2
 | "f4" => .ok .float32
 | "f8" => .ok .float64
 | _ => .error s!"Can't parse {s} as a dtype"
@@ -110,6 +111,7 @@ def dtypeNameToNpyString (t : TensorLib.Dtype) : String := match t with
 | .uint32 => "u4"
 | .uint64 => "u8"
 | .float16 => "f2"
+| .bfloat16 => "V2"
 | .float32 => "f4"
 | .float64 => "f8"
 

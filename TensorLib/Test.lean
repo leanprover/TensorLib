@@ -52,63 +52,104 @@ private def testFloat16EdgeCases : IO Bool := do
     -- max in fp16
     let v0 <- IO.ofExcept (decode 0)
     let c0 := v0 == 65504.0
-    IO.println s!"v0 (65504): {v0 == 65504.0}"
+    IO.println s!"fp16 v0 (65504): {v0 == 65504.0}"
     -- 0.1 cant be exact so check approx
     let v1 <- IO.ofExcept (decode 2)
     let diff := v1 - 0.1
     let c1 := diff < 0.002 && diff > -0.002
-    IO.println s!"v1 (0.1): {c1}"
+    IO.println s!"fp16 v1 (0.1): {c1}"
     -- IEE754 -0.0 == 0.0
     let v2 <- IO.ofExcept (decode 4)
     let c2 := v2 == 0.0
-    IO.println s!"v2 (-0): {c2}"
+    IO.println s!"fp16 v2 (-0): {c2}"
     -- +inf, -inf
     let v3 <- IO.ofExcept (decode 6)
     let c3 := v3 == posInf
-    IO.println s!"v3 (inf): {c3}"
+    IO.println s!"fp16 v3 (inf): {c3}"
     let v4 <- IO.ofExcept (decode 8)
     let c4 := v4 == negInf
-    IO.println s!"v4 (-inf): {c4}"
+    IO.println s!"fp16 v4 (-inf): {c4}"
     -- nan != nan
     let v5 <- IO.ofExcept (decode 10)
     let c5 := v5 != v5
-    IO.println s!"v5 (nan): {c5}"
+    IO.println s!"fp16 v5 (nan): {c5}"
     -- 2048.5 rounds to 2048 in fp16 npy (step size is 2)
     let v6 <- IO.ofExcept (decode 12)
-    IO.println s!"v6 actual: {v6}"
+    IO.println s!"fp16 v6 actual: {v6}"
     let c6 := v6 == 2048
-    IO.println s!"v6 (2048.5 rounds to 2048): {c6}"
+    IO.println s!"fp16 v6 (2048.5 rounds to 2048): {c6}"
     -- 100.5 fits in fp16
     let v7 <- IO.ofExcept (decode 14)
     let c7 := v7 == 100.5
-    IO.println s!"v7 (100.5) : {c7}"
+    IO.println s!"fp16 v7 (100.5) : {c7}"
     -- subnormals rounding
     let v8 <- IO.ofExcept (decode 16)
     let diff8 := v8 - 0.00005
     let c8 :=  diff8 < 0.000001 && diff8 > -0.000001
-    IO.println s!"v8 (subnormal 0.00005): {c8}, actual: {v8}"
+    IO.println s!"fp16 v8 (subnormal 0.00005): {c8}, actual: {v8}"
     -- below fp16 minimum subnormal so should be 0
     let v9 <- IO.ofExcept (decode 18)
     let c9 := v9 == 0.0
-    IO.println s!"v9 (1.16e-10 -> 0): {c9}"
+    IO.println s!"fp16 v9 (1.16e-10 -> 0): {c9}"
     -- more values below fp16 min subnormal → zero
     let v10 <- IO.ofExcept (decode 20)
     let c10 := v10 == 0.0
-    IO.println s!"v10 (1e-20 -> 0): {c10}"
+    IO.println s!"fp16 v10 (1e-20 -> 0): {c10}"
     let v11 <- IO.ofExcept (decode 22)
     let c11 := v11 == 0.0  -- -0.0 == 0.0 per IEEE 754
-    IO.println s!"v11 (-1e-20 -> -0): {c11}"
+    IO.println s!"fp16 v11 (-1e-20 -> -0): {c11}"
     let v12 <- IO.ofExcept (decode 24)
     let c12 := v12 == 0.0
-    IO.println s!"v12 (1e-40 -> 0): {c12}"
+    IO.println s!"fp16 v12 (1e-40 -> 0): {c12}"
     return c0 && c1 && c2 && c3 && c4 && c5 && c6 && c7 && c8 && c9 && c10 && c11 && c12
+
+
+-- bf16 edge cases
+private def testBFloat16EdgeCases : IO Bool := do
+  let file <- saveNumpyArray  "np.array([256.0, 0.1, -0.0, np.inf, -np.inf, np.nan, 3.3895e38]).astype(__import__('ml_dtypes').bfloat16)"
+  let npy <- Npy.parseFile file
+  let arr <- IO.ofExcept (Tensor.ofNpy npy)
+  let _ <- IO.FS.removeFile file
+  let decode (offset : Nat) : Err Float32 :=
+    Dtype.byteArrayToBFloat16 .bfloat16 (arr.data.extract offset (offset + 2))
+  let v0 <- IO.ofExcept (decode 0)
+  let c0 := v0 == 256.0
+  IO.println s!"bf16 v0 (256): {c0}"
+  -- 0.1 rounded in bf16
+  let v1 <- IO.ofExcept (decode 2)
+  let diff := v1 - 0.1
+  let c1 := diff < 0.01 && diff > -0.01
+  IO.println s!"bf16 v1 (0.1): {c1}"
+  -- negative zero
+  let v2 <- IO.ofExcept (decode 4)
+  let c2 := v2 == 0.0
+  IO.println s!"bf16 v2 (-0): {c2}"
+  -- +inf
+  let v3 <- IO.ofExcept (decode 6)
+  let c3 := v3 == Float32.ofBits 0x7F800000
+  IO.println s!"bf16 v3 (inf): {c3}"
+  -- -inf
+  let v4 <- IO.ofExcept (decode 8)
+  let c4 := v4 == Float32.ofBits 0xFF800000
+  IO.println s!"bf16 v4 (-inf): {c4}"
+  -- NaN
+  let v5 <- IO.ofExcept (decode 10)
+  let c5 := v5 != v5
+  IO.println s!"bf16 v5 (NaN): {c5}"
+  -- max bf16 value
+  let v6 <- IO.ofExcept (decode 12)
+  let c6 : Bool := v6 > (3.0e38 : Float32)
+  IO.println s!"bf16 v6 (max): {c6}"
+  return c0 && c1 && c2 && c3 && c4 && c5 && c6
+
 
 
 
 def runAllTests : IO Bool := do
  return (<- testTensorElementBV Dtype.uint16) &&
         (<- testTensorElementBV Dtype.uint32) &&
-        (<- testFloat16EdgeCases)
+        (<- testFloat16EdgeCases) &&
+        (<- testBFloat16EdgeCases)
 
 end Test
 end TensorLib
