@@ -1,3 +1,4 @@
 hypothesis
 numpy
 pytest
+ml-dtypes
