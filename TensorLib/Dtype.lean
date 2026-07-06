@@ -112,7 +112,7 @@ def isFloat (x : Dtype) : Bool := match x with
 def itemsize (x : Dtype) : Nat := match x with
 | float64 | int64 | uint64 => 8
 | float32 | int32 | uint32 => 4
-|bfloat16 | float16 | int16 | uint16 => 2
+| bfloat16 | float16 | int16 | uint16 => 2
 | bool | int8 | uint8 => 1
 
 
