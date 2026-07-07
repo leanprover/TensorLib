@@ -782,11 +782,10 @@ private def liftFloatUnop (f32 : Float32 -> Err Float32) (f64 : Float -> Err Flo
                           (dtype : Dtype) (data : ByteArray) : Err ByteArray := do
   if data.size != dtype.itemsize then throw "incorrect byte count" else
   match dtype with
-  | .float16 => do
-    -- cast to fp32, computation, then downcast
-    let f <- dtype.byteArrayToFloat16 data
+  | .float16 | .bfloat16 => do
+    let f <- decodeFloat16OrBFloat16 dtype data
     let x <- f32 f
-    return toLEByteArray x.toFloat16Bits
+    encodeFloat16OrBFloat16 dtype x
   | .float32 => do
     let f <- Float32.ofLEByteArray data
     let x <- f32 f
