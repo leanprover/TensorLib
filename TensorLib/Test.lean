@@ -180,7 +180,7 @@ private def testBFloat16EdgeCases : IO Bool := do
   let castToBf16 <- IO.ofExcept (Dtype.castOverflow .float32 f32_314 .bfloat16)
   let c14 := castToBf16 == toLEByteArray (16457 : UInt16)
   IO.println s!"bf16 fp32 to bf16 (3.14): {c14}"
-  -- float16(1.5) -< bfloat16 should give bits 16320
+  -- float16(1.5) -> bfloat16 should give bits 16320
   let f16_15 := toLEByteArray (Float32.ofNat 3 / Float32.ofNat 2).toFloat16Bits  -- fp16 encoding of 1.5
   let castF16ToBf16 <- IO.ofExcept (Dtype.castOverflow .float16 f16_15 .bfloat16)
   let c15 := castF16ToBf16 == toLEByteArray (16320 : UInt16)
@@ -191,7 +191,7 @@ private def testBFloat16EdgeCases : IO Bool := do
   let castToBool <- IO.ofExcept (Dtype.castOverflow .bfloat16 bf16NegZero .bool)
   let c16 := castToBool == ByteArray.mk #[0]
   IO.println s!"bf16 -0 to bool (false): {c16}"
-   -- bf16(inf) to fp32 should give inf
+  -- bf16(inf) to fp32 should give inf
   let bf16Inf := toLEByteArray (0x7F80 : UInt16)  -- bf16 +inf
   let castInfToF32 <- IO.ofExcept (Dtype.castOverflow .bfloat16 bf16Inf .float32)
   let infVal <- IO.ofExcept (Float32.ofLEByteArray castInfToF32)
