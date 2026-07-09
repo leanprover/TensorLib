@@ -154,10 +154,12 @@ def join (x y : Dtype) : Option Dtype :=
       -- cannot promote
       -- python3 -c "import ml_dtypes as m; import numpy as np; print(np.result_type(np.int16, m.bfloat16))"
       | .int16, .bfloat16 => none
+      | .int16, .float16 => float32
       | .int16, _ => y
       -- cannot promote
       -- python3 -c "import ml_dtypes as m; import numpy as np; print(np.result_type(np.uint16, m.bfloat16))"
       | .uint16, .bfloat16 => none
+      | .uint16, .float16 => float32
       | .uint16, _ => y
       | .int32, .uint32
       | .uint32, .int32 => int64
@@ -628,7 +630,7 @@ def isZero (dtype : Dtype) (x : ByteArray) : Err Bool := match dtype with
   let f <- Float.ofLEByteArray x
   return f == 0
 
- def castOverflow (fromDtype : Dtype) (data : ByteArray) (toDtype : Dtype) : Err ByteArray :=
+def castOverflow (fromDtype : Dtype) (data : ByteArray) (toDtype : Dtype) : Err ByteArray :=
   if fromDtype == toDtype then return data else
     match fromDtype, toDtype with
     -- For floats use isZero so -0 is correctly handled.
@@ -746,8 +748,8 @@ def logicalXor! (t1 : Dtype) (x1 : ByteArray) (t2 : Dtype) (x2 : ByteArray) : Bo
 /-
 When you call real functions on int arrays, for example, NumPy converts the array to some float
 type before calling the function. This follows some rules, which we approximate here, given we don't
-have all the types available in NumPy (e.g. float16) and we may have types like bfloat that aren't
-in NumPy out of the box.
+have all the types available in NumPy and we may have types like bfloat that aren't
+in NumPy out of the box (but are available via ml_dtypes).
 -/
 -- Float types remain unchanged
 -- intx and uintx map to the smallest float that holds their range
