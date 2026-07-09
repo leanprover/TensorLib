@@ -158,7 +158,7 @@ def _root_.Float32.toFloat16Bits (f : Float32) : UInt16 :=
 -- Subnormals are taken care of since bf16 sub = fp32 sub, same exponent range
 -- Sign is preserved  in normal values
 -- NaN sign is not preserved because Lean's fp32 type normalizes NaN to +NaN irrespective of input sign.
--- This matches ml_dtype's bfloat16 constructor behavior
+-- This diverges from ml_dtypes which preserves sign of NaN.
 def _root_.Float32.toBFloat16Bits (f : Float32) : UInt16 :=
   let bits := f.toBits
   let top := bits >>> 16 -- top 16 bits
@@ -278,6 +278,9 @@ warning: declaration uses 'sorry'
 
 -- Property: bf16 round-trip. Encode UInt16 as bf16 -> decode to Float32 -> encode back.
 -- Should give same bits (NaN may not round-trip via ==).
+-- Note: NaN patterns pass via f != f escape without testing encode/decode consistency.
+-- This is expected because Lean normalizes all NaN to 0x7FC00000 via Float32.toBits, so NaN bits cannot round-trip through
+-- fp32 regardless of our encode/decode logic.
 /--
 info: Unable to find a counter-example
 ---

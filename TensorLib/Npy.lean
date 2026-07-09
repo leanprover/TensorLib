@@ -120,7 +120,9 @@ def fromNpyString (s : String) : Err Dtype :=
   do
     let order <- ByteOrder.fromChar (s.get 0)
     let nameStr := s.drop 1
-    -- bf16 stored as "<V2" by ml_dtypes; "| V2" is actual void data
+    -- bf16 stored as "<V2" by ml_dtypes/JAX/TensorFlow (littleEndian)
+    -- We only recognize "<V2" as bf16 to avoid collision with "|V2" (actual void data).
+    -- Only littleEndian V2 is bf16. Tensor.toNpy always writes LE so this is safe.
     let name <- if nameStr == "V2" && order == .littleEndian then .ok .bfloat16
       else dtypeNameFromNpyString nameStr
     return { name, order }

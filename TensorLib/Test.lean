@@ -138,9 +138,68 @@ private def testBFloat16EdgeCases : IO Bool := do
   IO.println s!"bf16 v5 (NaN): {c5}"
   -- max bf16 value
   let v6 <- IO.ofExcept (decode 12)
-  let c6 : Bool := v6 > (3.0e38 : Float32)
+  let c6 := v6 == Float32.ofBits 0x7F7F0000
   IO.println s!"bf16 v6 (max): {c6}"
-  return c0 && c1 && c2 && c3 && c4 && c5 && c6
+  -- Arithmetic correctness: compare against ml_dtypes results
+  let a := toLEByteArray (Float32.ofNat 3 / Float32.ofNat 2).toBFloat16Bits  -- bf16 encoding of 1.5
+  let b := toLEByteArray (Float32.ofNat 5 / Float32.ofNat 2).toBFloat16Bits  -- bf16 encoding of 2.5
+  -- 1.5 + 2.5 = 4.0, ml_dtypes gives bits 16512
+  let addResult <- IO.ofExcept (Dtype.add .bfloat16 a b)
+  let c7 := addResult == toLEByteArray (16512 : UInt16)
+  IO.println s!"bf16 add (1.5 + 2.5 = 4.0): {c7}"
+  -- 1.5 - 2.5 = -1.0, ml_dtypes gives bits 49024
+  let subResult <- IO.ofExcept (Dtype.sub .bfloat16 a b)
+  let c8 := subResult == toLEByteArray (49024 : UInt16)
+  IO.println s!"bf16 sub (1.5 - 2.5 = -1.0): {c8}"
+  -- 1.5 * 2.5 = 3.75, ml_dtypes gives bits 16496
+  let mulResult <- IO.ofExcept (Dtype.mul .bfloat16 a b)
+  let c9 := mulResult == toLEByteArray (16496 : UInt16)
+  IO.println s!"bf16 mul (1.5 * 2.5 = 3.75): {c9}"
+  -- 1.5 / 2.5 = 0.6, ml_dtypes gives bits 16154
+  let divResult <- IO.ofExcept (Dtype.div .bfloat16 a b)
+  let c10 := divResult == toLEByteArray (16154 : UInt16)
+  IO.println s!"bf16 div (1.5 / 2.5 = 0.6): {c10}"
+  -- abs(-1.5) = 1.5, ml_dtypes gives bits 16320
+  let negA := toLEByteArray (Float32.ofNat 3 / Float32.ofNat 2).neg.toBFloat16Bits  -- bf16 encoding of -1.5
+  let absResult <- IO.ofExcept (Dtype.abs .bfloat16 negA)
+  let c11 := absResult == toLEByteArray (16320 : UInt16)
+  IO.println s!"bf16 abs (-1.5) =  1.5: {c11}"
+  -- Casting test cases
+  -- bf16(42) -> float32 should give 42.0
+  let bf42 := toLEByteArray (Float32.ofNat 42).toBFloat16Bits  -- bf16 encoding of 42
+  let castToF32 <- IO.ofExcept (Dtype.castOverflow .bfloat16 bf42 .float32)
+  let f32Val <- IO.ofExcept (Float32.ofLEByteArray castToF32)
+  let c12 := f32Val == 42.0
+  IO.println s!"bf16 cast bf16 to f32 (42): {c12}"
+  -- bf16(42) -> int8 should give 42
+  let castToI8 <- IO.ofExcept (Dtype.castOverflow .bfloat16 bf42 .int8)
+  let c13 := castToI8.toNat == 42
+  IO.println s!"bf16 cast bf16 to int8 (42): {c13}"
+  -- f32(3.14) -> bf16 should give bits 16457
+  let f32_314 := toLEByteArray (Float32.ofNat 314 / Float32.ofNat 100)
+  let castToBf16 <- IO.ofExcept (Dtype.castOverflow .float32 f32_314 .bfloat16)
+  let c14 := castToBf16 == toLEByteArray (16457 : UInt16)
+  IO.println s!"bf16 fp32 to bf16 (3.14): {c14}"
+  -- float16(1.5) -< bfloat16 should give bits 16320
+  let f16_15 := toLEByteArray (Float32.ofNat 3 / Float32.ofNat 2).toFloat16Bits  -- fp16 encoding of 1.5
+  let castF16ToBf16 <- IO.ofExcept (Dtype.castOverflow .float16 f16_15 .bfloat16)
+  let c15 := castF16ToBf16 == toLEByteArray (16320 : UInt16)
+  IO.println s!"bf16 fp16 to bf16 (1.5): {c15}"
+  -- bf16(-0.0) -> bool should give 0 (false)
+  -- Tests isFloat/isZero: -0.0 has nonzero sign byte (0x80) but is still 0
+  let bf16NegZero := toLEByteArray (0x8000 : UInt16)  -- bf16 -0.0
+  let castToBool <- IO.ofExcept (Dtype.castOverflow .bfloat16 bf16NegZero .bool)
+  let c16 := castToBool == ByteArray.mk #[0]
+  IO.println s!"bf16 -0 to bool (false): {c16}"
+   -- bf16(inf) to fp32 should give inf
+  let bf16Inf := toLEByteArray (0x7F80 : UInt16)  -- bf16 +inf
+  let castInfToF32 <- IO.ofExcept (Dtype.castOverflow .bfloat16 bf16Inf .float32)
+  let infVal <- IO.ofExcept (Float32.ofLEByteArray castInfToF32)
+  let c17 := infVal == Float32.ofBits 0x7F800000
+  IO.println s!"bf16 inf to fp32: {c17}"
+
+
+  return c0 && c1 && c2 && c3 && c4 && c5 && c6 && c7 && c8 && c9 && c10 && c11 && c12 && c13 && c14 && c15 && c16 && c17
 
 
 
