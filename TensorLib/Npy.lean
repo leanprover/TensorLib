@@ -110,6 +110,7 @@ def dtypeNameToNpyString (t : TensorLib.Dtype) : String := match t with
 | .uint16 => "u2"
 | .uint32 => "u4"
 | .uint64 => "u8"
+| .float8_e4m3 => "V1"
 | .float16 => "f2"
 | .bfloat16 => "V2"
 | .float32 => "f4"
@@ -124,6 +125,7 @@ def fromNpyString (s : String) : Err Dtype :=
     -- We only recognize "<V2" as bf16 to avoid collision with "|V2" (actual void data).
     -- Only littleEndian V2 is bf16. Tensor.toNpy always writes LE so this is safe.
     let name <- if nameStr == "V2" && order == .littleEndian then .ok .bfloat16
+      else if nameStr == "V1" && order == .littleEndian then .ok .float8_e4m3
       else dtypeNameFromNpyString nameStr
     return { name, order }
 
