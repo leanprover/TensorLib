@@ -421,5 +421,9 @@ end Save
 def Ndarray.save! (arr : Ndarray) (file : System.FilePath) : IO Unit :=
   IO.FS.writeBinFile file arr.toByteArray!
 
+-- Hermetic parse tests: no Python dependency
+#guard Npy.Dtype.fromNpyString "<V2" == .ok { name := .bfloat16, order := .littleEndian }
+#guard Npy.Dtype.fromNpyString "|V2" != .ok { name := .bfloat16, order := .littleEndian }
+
 end Npy
 end TensorLib

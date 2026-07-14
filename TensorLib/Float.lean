@@ -102,6 +102,7 @@ def _root_.Float.toInt (f : Float) : Int :=
 def _root_.Float.quietNaN : Float := Float.ofBits 0x7FF8000000000000
 
 -- Convert a float32 to Float16 as UInt16
+-- NaN sign is not preserved because Lean's fp32 normalizes NaN to +NaN irrespective of input sign which diverges from ml_dtypes (ml_dtypes preserves sign of NaN)
 def _root_.Float32.toFloat16Bits (f : Float32) : UInt16 :=
   let bits := f.toBits
   let sign := (bits >>> 31) &&& 1
