@@ -147,6 +147,11 @@ def join (x y : Dtype) : Option Dtype :=
       | .bool, _ => y
       | .int8, .uint8
       | .uint8, .int8 => int16
+      | .int8, .uint16 => int32
+      | .int8, .uint32 => int64
+      | .int8, .uint64 => float64
+      | .int8, .bool => int8
+      | .uint8, .bool => uint8
       | .int8, _
       | .uint8, _ => y
       | .int16, .uint16
@@ -155,7 +160,11 @@ def join (x y : Dtype) : Option Dtype :=
       -- python3 -c "import ml_dtypes as m; import numpy as np; print(np.result_type(np.int16, m.bfloat16))"
       | .int16, .bfloat16 => none
       | .int16, .float16 => float32
-      | .int16, _ => y
+      | .int16, .int32 => int32
+      | .int16, .int64 => int64
+      | .int16, .uint32 => int64
+      | .int16, .uint64 => float64
+      | .int16, _ => none
       -- cannot promote
       -- python3 -c "import ml_dtypes as m; import numpy as np; print(np.result_type(np.uint16, m.bfloat16))"
       | .uint16, .bfloat16 => none
@@ -467,14 +476,15 @@ private def byteArrayToBFloat16RoundTrip (dtype : Dtype) (f : Float32) : Bool :=
 #guard bfloat16.byteArrayToBFloat16RoundTrip 256
 
 -- helper functions for fp16 and bf16 arithmetic to reduce duplicate code
+-- Decode/ encode 2 byte float to float32 by calling the conversion kernel directly
 private def decodeFloat16OrBFloat16 (dtype : Dtype) (arr : ByteArray) : Err Float32 := match dtype with
-  | .float16 => dtype.byteArrayToFloat16 arr
-  | .bfloat16 => dtype.byteArrayToBFloat16 arr
+  | .float16 => arr.toUInt16LE.map UInt16.toFloat32FromFloat16
+  | .bfloat16 => arr.toUInt16LE.map UInt16.toFloat32FromBFloat16
   | _ => .error "decoder: expected float16 or bfloat16"
 
 private def encodeFloat16OrBFloat16 (dtype : Dtype) (f : Float32) : Err ByteArray := match dtype with
-  | .float16 => dtype.byteArrayOfFloat16 f
-  | .bfloat16 => dtype.byteArrayOfBFloat16 f
+  | .float16 => .ok (toLEByteArray f.toFloat16Bits)
+  | .bfloat16 => .ok (toLEByteArray f.toBFloat16Bits)
   | _ => .error "encoder: expected float16 or bfloat16"
 
 

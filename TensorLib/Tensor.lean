@@ -594,13 +594,20 @@ def toNatTree! (arr : Tensor) : Format.Tree Nat := get! $ toNatTree arr
 
 def toFloat32Tree (arr : Tensor) : Err (Format.Tree Float32) := do
   let t <- arr.toByteArrayTree
-  return t.map Float32.ofLEByteArray!
+  match arr.dtype with
+  | .float16 => return t.map (fun b => (Dtype.byteArrayToFloat16 .float16 b).toOption.getD 0)
+  | .bfloat16 => return t.map (fun b => (Dtype.byteArrayToBFloat16 .bfloat16 b).toOption.getD 0)
+  | _ => return t.map Float32.ofLEByteArray!
 
 def toFloat32Tree! (arr : Tensor) : Format.Tree Float32 := get! $ toFloat32Tree arr
 
 def toFloat64Tree (arr : Tensor) : Err (Format.Tree Float) := do
   let t <- arr.toByteArrayTree
-  return t.map Float.ofLEByteArray!
+  match arr.dtype with
+  | .float16 => return t.map (fun b => ((Dtype.byteArrayToFloat16 .float16 b).toOption.getD 0).toFloat)
+  | .bfloat16 => return t.map (fun b => ((Dtype.byteArrayToBFloat16 .bfloat16 b).toOption.getD 0).toFloat)
+  | .float32 => return t.map (fun b => (Float32.ofLEByteArray! b).toFloat)
+  | _ => return t.map Float.ofLEByteArray!
 
 def toFloat64Tree! (arr : Tensor) : Format.Tree Float := get! $ toFloat64Tree arr
 
