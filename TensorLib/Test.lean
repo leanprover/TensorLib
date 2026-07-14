@@ -40,6 +40,13 @@ private def checkBits (label : String) (expected : UInt16) (act : Err ByteArray)
   IO.println s!"{label}: {pass}"
   return pass
 
+-- Helper: check that a dtype operation produced the expected UInt8 bit pattern
+private def checkBitsU8 (label : String) (expected : UInt8) (act : Err ByteArray) : IO Bool := do
+  let result <- IO.ofExcept act
+  let pass := result == toLEByteArray expected
+  IO.println s!"{label}: {pass}"
+  return pass
+
 private def testTensorElementBV (dtype : Dtype) : IO Bool := do
   let file <- saveNumpyArray s!"np.arange(20, dtype='{dtype}').reshape(5, 4)"
   let npy <- Npy.parseFile file
@@ -269,12 +276,200 @@ private def testBFloat16EdgeCases : IO Bool := do
 
   return checks.all id
 
+  -- float8_e4m3fn edge cases: decode from npy, arithmetic, and casting
+  -- E4M3FN: 1 sign + 4 exponent + 3 mantissa, bias=7, max=448, no inf, only NaN
+  -- verified against ml_dtypes outputs
+  -- private def testFloat8E4M3EdgeCases : IO Bool := do
+  --   -- Save a numpy array with known e4m3 values and read it back
+  --   let file <- saveNumpyArray "np.array([448.0, 0.1, -0.0, 0.001953125, 1.5, 0.5, 16.0, 256.0]).astype(__import__('ml_dtypes').float8_e4m3fn)"
+  --   let npy <- Npy.parseFile file
+  --   let arr <- IO.ofExcept (Tensor.ofNpy npy)
+  --   let _ <- IO.FS.removeFile file
+  --   -- Each element is 1 byte; decode from raw byte at offset
+  --   let decode (offset : Nat) : Float32 := arr.data.data[offset]!.toFloat32FromFloat8E4M3
+  --   -- max representable value in e4m3fn (exp=15, mant=6 -> (1+6/8)*2^8 = 448)
+  --   let v0 := decode 0
+  --   let c0 := v0 == Float32.ofBits 0x43E00000
+  --   IO.println s!"e4m3 v0 (448): {c0}"
+  --   -- 0.1 is not exactly representable; rounds to 0.1015625 in e4m3
+  --   let v1 := decode 1
+  --   let diff := v1 - 0.1015625
+  --   let c1 := diff < 0.0001 && diff > -0.0001
+  --   IO.println s!"e4m3 v1 (0.1 ~ 0.1015625): {c1}"
+  --   -- negative zero: IEEE 754 says -0.0 == 0.0
+  --   let v2 := decode 2
+  --   let c2 := v2 == 0.0
+  --   IO.println s!"e4m3 v2 (-0): {c2}"
+  --   -- smallest subnormal: bits=1, value = 1 * 2^(-9) = 0.001953125
+  --   let v3 := decode 3
+  --   let c3 := v3 == Float32.ofBits 0x3B000000
+  --   IO.println s!"e4m3 v3 (smallest subnormal): {c3}"
+  --   -- 1.5 is exactly representable (exp=7, mant=4 → (1+4/8)*2^0 = 1.5)
+  --   let v4 := decode 4
+  --   let c4 := v4 == 1.5
+  --   IO.println s!"e4m3 v4 (1.5): {c4}"
+  --   -- 0.5 is exactly representable (exp=6, mant=0 → 1.0*2^(-1) = 0.5)
+  --   let v5 := decode 5
+  --   let c5 := v5 == 0.5
+  --   IO.println s!"e4m3 v5 (0.5): {c5}"
+  --   -- 16 = 2^4 = maxSafeNat (largest consecutive integer)
+  --   let v6 := decode 6
+  --   let c6 := v6 == Float32.ofNat 16
+  --   IO.println s!"e4m3 v6 (16): {c6}"
+  --   -- 256 = 2^8, exactly representable (exp=15, mant=0)
+  --   let v7 := decode 7
+  --   let c7 := v7 == Float32.ofNat 256
+  --   IO.println s!"e4m3 v7 (256): {c7}"
+  --   -- Arithmetic : compare against ml_dtypes results
+  --   let a := toLEByteArray (68 : UInt8)   -- e4m3 encoding of 3.0
+  --   let b := toLEByteArray (52 : UInt8)   -- e4m3 encoding of 0.75
+  --   -- 3.0 + 0.75 = 3.75, ml_dtypes gives bits 71
+  --   let addResult <- IO.ofExcept (Dtype.add .float8_e4m3 a b)
+  --   let c8 := addResult == toLEByteArray (71 : UInt8)
+  --   IO.println s!"e4m3 add (3.0 + 0.75 = 3.75): {c8}"
+  --   -- 3.0 - 0.75 = 2.25, ml_dtypes gives bits 65
+  --   let subResult <- IO.ofExcept (Dtype.sub .float8_e4m3 a b)
+  --   let c9 := subResult == toLEByteArray (65 : UInt8)
+  --   IO.println s!"e4m3 sub (3.0 - 0.75 = 2.25): {c9}"
+  --   -- 3.0 * 0.75 = 2.25, ml_dtypes gives bits 65
+  --   let mulResult <- IO.ofExcept (Dtype.mul .float8_e4m3 a b)
+  --   let c10 := mulResult == toLEByteArray (65 : UInt8)
+  --   IO.println s!"e4m3 mul (3.0 * 0.75 = 2.25): {c10}"
+  --   -- 3.0 / 0.75 = 4.0, ml_dtypes gives bits 72
+  --   let divResult <- IO.ofExcept (Dtype.div .float8_e4m3 a b)
+  --   let c11 := divResult == toLEByteArray (72 : UInt8)
+  --   IO.println s!"e4m3 div (3.0 / 0.75 = 4.0): {c11}"
+  --   -- abs(-3.0) = 3.0, clears sign bit: bits 196 -> 68
+  --   let negA := toLEByteArray (196 : UInt8)  -- e4m3 encoding of -3.0
+  --   let absResult <- IO.ofExcept (Dtype.abs .float8_e4m3 negA)
+  --   let c12 := absResult == toLEByteArray (68 : UInt8)
+  --   IO.println s!"e4m3 abs (-3.0) = 3.0: {c12}"
+  --   -- e4m3(3.0) -> int8 truncates to 3
+  --   let castToI8 <- IO.ofExcept (Dtype.castOverflow .float8_e4m3 a .int8)
+  --   let c13 := castToI8.toNat == 3
+  --   IO.println s!"e4m3 cast to int8 (3.0 -> 3): {c13}"
+  --   -- e4m3(-0.0) -> bool should be false (isZero handles -0 correctly)
+  --   let negZero := toLEByteArray (128 : UInt8)  -- e4m3 -0.0 (sign bit set, rest zero)
+  --   let castToBool <- IO.ofExcept (Dtype.castOverflow .float8_e4m3 negZero .bool)
+  --   let c14 := castToBool == ByteArray.mk #[0]
+  --   IO.println s!"e4m3 -0 to bool (false): {c14}"
+  --   -- fp32(3.0) -> e4m3 should give bits 68
+  --   let f32_3 := toLEByteArray (Float32.ofNat 3)
+  --   let castToE4m3 <- IO.ofExcept (Dtype.castOverflow .float32 f32_3 .float8_e4m3)
+  --   let c15 := castToE4m3 == toLEByteArray (68 : UInt8)
+  --   IO.println s!"e4m3 fp32 to e4m3 (3.0): {c15}"
+  --   return c0 && c1 && c2 && c3 && c4 && c5 && c6 && c7 && c8 && c9 && c10 && c11 && c12 && c13 && c14 && c15
+
+
+-- float8_e4m3fn edge cases: decode from npy, arithmetic, and casting
+-- E4M3FN: 1 sign + 4 exponent + 3 mantissa, bias=7, max=448, no inf, only NaN
+-- verified against ml_dtypes outputs
+private def testFloat8E4M3EdgeCases : IO Bool := do
+  let file <- saveNumpyArray "np.array([448.0, 0.1, -0.0, 0.001953125, 1.5, 0.5, 16.0, 256.0]).astype(__import__('ml_dtypes').float8_e4m3fn)"
+  let npy <- Npy.parseFile file
+  let arr <- IO.ofExcept (Tensor.ofNpy npy)
+  let _ <- IO.FS.removeFile file
+  -- Each element is 1 byte; decode from raw byte at offset
+  let decode (offset : Nat) : Float32 := arr.data.data[offset]!.toFloat32FromFloat8E4M3
+  let mut checks : List Bool := []
+
+  -- max representable value in e4m3fn (exp=15, mant=6 -> (1+6/8)*2^8 = 448)
+  let v0 := decode 0
+  let pass := v0 == Float32.ofBits 0x43E00000
+  IO.println s!"e4m3 v0 (448): {pass}"
+  checks := pass :: checks
+
+  -- 0.1 is not exactly representable; rounds to 0.1015625 in e4m3
+  let v1 := decode 1
+  let diff := v1 - 0.1015625
+  let pass := diff < 0.0001 && diff > -0.0001
+  IO.println s!"e4m3 v1 (0.1 ~ 0.1015625): {pass}"
+  checks := pass :: checks
+
+  -- negative zero: IEEE 754 says -0.0 == 0.0
+  let v2 := decode 2
+  let pass := v2 == 0.0
+  IO.println s!"e4m3 v2 (-0): {pass}"
+  checks := pass :: checks
+
+  -- smallest subnormal: bits=1, value = 1 * 2^(-9) = 0.001953125
+  let v3 := decode 3
+  let pass := v3 == Float32.ofBits 0x3B000000
+  IO.println s!"e4m3 v3 (smallest subnormal): {pass}"
+  checks := pass :: checks
+
+  -- 1.5 is exactly representable (exp=7, mant=4 -> (1+4/8)*2^0 = 1.5)
+  let v4 := decode 4
+  let pass := v4 == 1.5
+  IO.println s!"e4m3 v4 (1.5): {pass}"
+  checks := pass :: checks
+
+  -- 0.5 is exactly representable (exp=6, mant=0 -> 1.0*2^(-1) = 0.5)
+  let v5 := decode 5
+  let pass := v5 == 0.5
+  IO.println s!"e4m3 v5 (0.5): {pass}"
+  checks := pass :: checks
+
+  -- 16 = 2^4 = maxSafeNat (largest consecutive integer)
+  let v6 := decode 6
+  let pass := v6 == Float32.ofNat 16
+  IO.println s!"e4m3 v6 (16): {pass}"
+  checks := pass :: checks
+
+  -- 256 = 2^8, exactly representable (exp=15, mant=0)
+  let v7 := decode 7
+  let pass := v7 == Float32.ofNat 256
+  IO.println s!"e4m3 v7 (256): {pass}"
+  checks := pass :: checks
+
+  -- Arithmetic: compare against ml_dtypes results
+  let a := toLEByteArray (68 : UInt8)   -- e4m3 encoding of 3.0
+  let b := toLEByteArray (52 : UInt8)   -- e4m3 encoding of 0.75
+  let negA := toLEByteArray (196 : UInt8)  -- e4m3 encoding of -3.0
+
+  let pass <- checkBitsU8 "e4m3 add (3.0 + 0.75 = 3.75)" 71 (Dtype.add .float8_e4m3 a b)
+  checks := pass :: checks
+
+  let pass <- checkBitsU8 "e4m3 sub (3.0 - 0.75 = 2.25)" 65 (Dtype.sub .float8_e4m3 a b)
+  checks := pass :: checks
+
+  let pass <- checkBitsU8 "e4m3 mul (3.0 * 0.75 = 2.25)" 65 (Dtype.mul .float8_e4m3 a b)
+  checks := pass :: checks
+
+  let pass <- checkBitsU8 "e4m3 div (3.0 / 0.75 = 4.0)" 72 (Dtype.div .float8_e4m3 a b)
+  checks := pass :: checks
+
+  let pass <- checkBitsU8 "e4m3 abs (-3.0) = 3.0" 68 (Dtype.abs .float8_e4m3 negA)
+  checks := pass :: checks
+
+  -- Casting: e4m3(3.0) -> int8 truncates to 3
+  let castToI8 <- IO.ofExcept (Dtype.castOverflow .float8_e4m3 a .int8)
+  let pass := castToI8.toNat == 3
+  IO.println s!"e4m3 cast to int8 (3.0 -> 3): {pass}"
+  checks := pass :: checks
+
+  -- e4m3(-0.0) -> bool should be false (isZero handles -0 correctly)
+  let negZero := toLEByteArray (128 : UInt8)
+  let castToBool <- IO.ofExcept (Dtype.castOverflow .float8_e4m3 negZero .bool)
+  let pass := castToBool == ByteArray.mk #[0]
+  IO.println s!"e4m3 -0 to bool (false): {pass}"
+  checks := pass :: checks
+
+  -- fp32(3.0) -> e4m3 should give bits 68
+  let f32_3 := toLEByteArray (Float32.ofNat 3)
+  let castToE4m3 <- IO.ofExcept (Dtype.castOverflow .float32 f32_3 .float8_e4m3)
+  let pass := castToE4m3 == toLEByteArray (68 : UInt8)
+  IO.println s!"e4m3 fp32 to e4m3 (3.0): {pass}"
+  checks := pass :: checks
+
+  return checks.all id
 
 def runAllTests : IO Bool := do
  return (<- testTensorElementBV Dtype.uint16) &&
         (<- testTensorElementBV Dtype.uint32) &&
         (<- testFloat16EdgeCases) &&
-        (<- testBFloat16EdgeCases)
+        (<- testBFloat16EdgeCases) &&
+        (<- testFloat8E4M3EdgeCases)
 
 end Test
 end TensorLib
