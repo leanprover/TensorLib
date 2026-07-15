@@ -593,7 +593,7 @@ def toNatTree (arr : Tensor) : Err (Format.Tree Nat) := do
 def toNatTree! (arr : Tensor) : Format.Tree Nat := get! $ toNatTree arr
 
 -- decode each element to fp32
--- Errors progate instead of being silently replaced with 0 using mapM instead of map.
+-- Errors propagate instead of being silently replaced with 0 using mapM instead of map.
 def toFloat32Tree (arr : Tensor) : Err (Format.Tree Float32) := do
   let t <- arr.toByteArrayTree
   match arr.dtype with
