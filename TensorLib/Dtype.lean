@@ -145,6 +145,9 @@ def join (x y : Dtype) : Option Dtype :=
       | .bfloat16, _ => none
       | .float8_e4m3, .float32 => float32
       | .float8_e4m3, .float64 => float64
+      | .float8_e4m3, .bool
+      | .float8_e4m3, .int8
+      | .float8_e4m3, .uint8 => float8_e4m3
       | .float8_e4m3, _ => none
       | .float32, .float64 => float64
       | .float32, _
@@ -837,6 +840,10 @@ private def liftFloatUnop (f32 : Float32 -> Err Float32) (f64 : Float -> Err Flo
                           (dtype : Dtype) (data : ByteArray) : Err ByteArray := do
   if data.size != dtype.itemsize then throw "incorrect byte count" else
   match dtype with
+  | .float8_e4m3 => do
+      let f := data.data[0]!.toFloat32FromFloat8E4M3
+      let x <- f32 f
+      return ByteArray.mk #[x.toFloat8E4M3Bits]
   | .float16 | .bfloat16 => do
     let f <- decodeFloat16OrBFloat16 dtype data
     let x <- f32 f
