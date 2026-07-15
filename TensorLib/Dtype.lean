@@ -175,9 +175,11 @@ def join (x y : Dtype) : Option Dtype :=
       | .int32, .uint64 => float64
       | .int32, _
       | .uint32, _ => y
+      -- uint64 and int64 are both 8 so the swap guard fails;
+      -- need both directions explicit whereas other types paired with int64 are smaller and get swapped before reaching here
+      | .uint64, .int64
       | .int64, .uint64 => float64
       | .int64, _
-      | _, .int64
       | .uint64, _ => none
 
 -- Can we cast from one dtype to another without losing information
@@ -394,10 +396,6 @@ def byteArrayOfFloat32 (dtype : Dtype) (f : Float32) : Err ByteArray := match dt
 
 private def byteArrayOfFloat32! (dtype : Dtype) (f : Float32) : ByteArray := get! $ byteArrayOfFloat32 dtype f
 
--- def byteArrayOfFloat16 (dtype : Dtype) (f : Float32) : Err ByteArray :=
---   if dtype == .float16 then .ok (toLEByteArray f.toFloat16Bits)
---   else .error "Illegal type conversion"
-
 private def byteArrayToFloat64RoundTrip (dtype : Dtype) (f : Float) : Bool :=
   let res := do
     let arr <- dtype.byteArrayOfFloat64 f
@@ -466,10 +464,6 @@ private def byteArrayToFloat16RoundTrip (dtype : Dtype) (f : Float32) : Bool :=
 def byteArrayToBFloat16 (dtype : Dtype) (arr : ByteArray) : Err Float32 := match dtype with
   | .bfloat16 => arr.toUInt16LE.map UInt16.toFloat32FromBFloat16
   | _ => .error "Illegal type conversion"
-
--- def byteArrayOfBFloat16 (dtype : Dtype) (f : Float32) : Err ByteArray :=
---   if dtype == .bfloat16 then .ok (toLEByteArray f.toBFloat16Bits)
---   else .error "Illegal type conversion"
 
 -- roundtrip helper: encode fp32 -> bf16 -> fp32
 -- if output is same as input we know the encoder and decoder are consistent
