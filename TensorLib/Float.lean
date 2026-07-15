@@ -314,17 +314,8 @@ def _root_.Float32.toFloat8E4M3Bits (f : Float32) : UInt8 :=
       let rounded := if roundBit == 1 && (stickyBits != 0 || truncated &&& 1 == 1)
         then truncated + 1 else truncated
       -- If rounding overflows mantissa (0b1000), bump exponent
-      let (finalExp, finalMant) := if rounded > 0x7 then
-        -- Check if bumping exp would exceed max
-        if e4m3Exp + 1 == 15 then
-          -- New exp=15, mant=0 is valid (value = 1.0 * 2^8 = 256)
-          (e4m3Exp + 1, (0 : UInt32))
-        else if e4m3Exp + 1 > 15 then
-          -- Would overflow — but this shouldn't happen in normal range
-          (15, (7 : UInt32))  -- NaN, handled below
-        else
-          (e4m3Exp + 1, (0 : UInt32))
-      else (e4m3Exp, rounded)
+      -- e4m3Exp is [1, 14] here so e4m3Exp + 1 is always in [2, 15] and never overflows.
+      let (finalExp, finalMant) := if rounded > 0x7 then (e4m3Exp + 1, (0 : UInt32)) else (e4m3Exp, rounded)
       -- Check if we accidentally hit NaN pattern (exp=15, mant=7)
       if finalExp == 15 && finalMant == 7 then
         sign8 ||| 0x7F  -- NaN
