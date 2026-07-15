@@ -172,8 +172,10 @@ def join (x y : Dtype) : Option Dtype :=
       | .uint16, _ => y
       | .int32, .uint32
       | .uint32, .int32 => int64
+      | .int32, .uint64 => float64
       | .int32, _
       | .uint32, _ => y
+      | .int64, .uint64 => float64
       | .int64, _
       | _, .int64
       | .uint64, _ => none
@@ -392,9 +394,9 @@ def byteArrayOfFloat32 (dtype : Dtype) (f : Float32) : Err ByteArray := match dt
 
 private def byteArrayOfFloat32! (dtype : Dtype) (f : Float32) : ByteArray := get! $ byteArrayOfFloat32 dtype f
 
-def byteArrayOfFloat16 (dtype : Dtype) (f : Float32) : Err ByteArray :=
-  if dtype == .float16 then .ok (toLEByteArray f.toFloat16Bits)
-  else .error "Illegal type conversion"
+-- def byteArrayOfFloat16 (dtype : Dtype) (f : Float32) : Err ByteArray :=
+--   if dtype == .float16 then .ok (toLEByteArray f.toFloat16Bits)
+--   else .error "Illegal type conversion"
 
 private def byteArrayToFloat64RoundTrip (dtype : Dtype) (f : Float) : Bool :=
   let res := do
@@ -435,15 +437,24 @@ def byteArrayToFloat16 (dtype : Dtype)(arr : ByteArray) : Err Float32 := match d
   | .float16 => arr.toUInt16LE.map UInt16.toFloat32FromFloat16
   | _ => .error "Illegal type conversion"
 
+-- helper functions for fp16 and bf16 arithmetic to reduce duplicate code
+-- Decode/ encode 2 byte float to float32 by calling the conversion kernel directly
+private def decodeFloat16OrBFloat16 (dtype : Dtype) (arr : ByteArray) : Err Float32 := match dtype with
+  | .float16 => arr.toUInt16LE.map UInt16.toFloat32FromFloat16
+  | .bfloat16 => arr.toUInt16LE.map UInt16.toFloat32FromBFloat16
+  | _ => .error "decoder: expected float16 or bfloat16"
 
+private def encodeFloat16OrBFloat16 (dtype : Dtype) (f : Float32) : Err ByteArray := match dtype with
+  | .float16 => .ok (toLEByteArray f.toFloat16Bits)
+  | .bfloat16 => .ok (toLEByteArray f.toBFloat16Bits)
+  | _ => .error "encoder: expected float16 or bfloat16"
 
 private def byteArrayToFloat16RoundTrip (dtype : Dtype) (f : Float32) : Bool :=
   let res := do
-    let arr <- dtype.byteArrayOfFloat16 f
-    let f' <- dtype.byteArrayToFloat16 arr
+    let arr <- encodeFloat16OrBFloat16 dtype f
+    let f' <- decodeFloat16OrBFloat16 dtype arr
     return f == f'
   res.toOption.getD false
-
 
 #guard float16.byteArrayToFloat16RoundTrip 0
 #guard float16.byteArrayToFloat16RoundTrip 1.5
@@ -456,16 +467,16 @@ def byteArrayToBFloat16 (dtype : Dtype) (arr : ByteArray) : Err Float32 := match
   | .bfloat16 => arr.toUInt16LE.map UInt16.toFloat32FromBFloat16
   | _ => .error "Illegal type conversion"
 
-def byteArrayOfBFloat16 (dtype : Dtype) (f : Float32) : Err ByteArray :=
-  if dtype == .bfloat16 then .ok (toLEByteArray f.toBFloat16Bits)
-  else .error "Illegal type conversion"
+-- def byteArrayOfBFloat16 (dtype : Dtype) (f : Float32) : Err ByteArray :=
+--   if dtype == .bfloat16 then .ok (toLEByteArray f.toBFloat16Bits)
+--   else .error "Illegal type conversion"
 
 -- roundtrip helper: encode fp32 -> bf16 -> fp32
 -- if output is same as input we know the encoder and decoder are consistent
 private def byteArrayToBFloat16RoundTrip (dtype : Dtype) (f : Float32) : Bool :=
   let res := do
-    let arr <- dtype.byteArrayOfBFloat16 f -- fp32 to 2 bf16 bytes
-    let f' <- dtype.byteArrayToBFloat16 arr -- back to fp32
+    let arr <- encodeFloat16OrBFloat16 dtype f -- fp32 to 2 bf16 bytes
+    let f' <- decodeFloat16OrBFloat16 dtype arr-- back to fp32
     return f == f'
   res.toOption.getD false -- return false if this returned an error
 
@@ -475,17 +486,6 @@ private def byteArrayToBFloat16RoundTrip (dtype : Dtype) (f : Float32) : Bool :=
 #guard bfloat16.byteArrayToBFloat16RoundTrip (-0)
 #guard bfloat16.byteArrayToBFloat16RoundTrip 256
 
--- helper functions for fp16 and bf16 arithmetic to reduce duplicate code
--- Decode/ encode 2 byte float to float32 by calling the conversion kernel directly
-private def decodeFloat16OrBFloat16 (dtype : Dtype) (arr : ByteArray) : Err Float32 := match dtype with
-  | .float16 => arr.toUInt16LE.map UInt16.toFloat32FromFloat16
-  | .bfloat16 => arr.toUInt16LE.map UInt16.toFloat32FromBFloat16
-  | _ => .error "decoder: expected float16 or bfloat16"
-
-private def encodeFloat16OrBFloat16 (dtype : Dtype) (f : Float32) : Err ByteArray := match dtype with
-  | .float16 => .ok (toLEByteArray f.toFloat16Bits)
-  | .bfloat16 => .ok (toLEByteArray f.toBFloat16Bits)
-  | _ => .error "encoder: expected float16 or bfloat16"
 
 
 -- Add produces the IEEE754 result because fp32 (p=24) satisfies the innocuous double rounding condition (theoreom 20)
