@@ -592,22 +592,25 @@ def toNatTree (arr : Tensor) : Err (Format.Tree Nat) := do
 
 def toNatTree! (arr : Tensor) : Format.Tree Nat := get! $ toNatTree arr
 
+-- decode each element to fp32
+-- Errors progate instead of being silently replaced with 0 using mapM instead of map.
 def toFloat32Tree (arr : Tensor) : Err (Format.Tree Float32) := do
   let t <- arr.toByteArrayTree
   match arr.dtype with
-  | .float16 => return t.map (fun b => (Dtype.byteArrayToFloat16 .float16 b).toOption.getD 0)
-  | .bfloat16 => return t.map (fun b => (Dtype.byteArrayToBFloat16 .bfloat16 b).toOption.getD 0)
-  | _ => return t.map Float32.ofLEByteArray!
+  | .float16 => t.mapM (fun b => Dtype.byteArrayToFloat16 .float16 b)
+  | .bfloat16 => t.mapM (fun b => Dtype.byteArrayToBFloat16 .bfloat16 b)
+  | _ => t.mapM ( fun b => Float32.ofLEByteArray b)
 
 def toFloat32Tree! (arr : Tensor) : Format.Tree Float32 := get! $ toFloat32Tree arr
 
 def toFloat64Tree (arr : Tensor) : Err (Format.Tree Float) := do
   let t <- arr.toByteArrayTree
   match arr.dtype with
-  | .float16 => return t.map (fun b => ((Dtype.byteArrayToFloat16 .float16 b).toOption.getD 0).toFloat)
-  | .bfloat16 => return t.map (fun b => ((Dtype.byteArrayToBFloat16 .bfloat16 b).toOption.getD 0).toFloat)
-  | .float32 => return t.map (fun b => (Float32.ofLEByteArray! b).toFloat)
-  | _ => return t.map Float.ofLEByteArray!
+  | .float16 => t.mapM (fun b => do let f <- Dtype.byteArrayToFloat16 .float16 b; return f.toFloat)
+  | .bfloat16 => t.mapM (fun b => do let f <- Dtype.byteArrayToBFloat16 .bfloat16 b; return f.toFloat)
+  | .float32 => t.mapM (fun b => do let f <- Float32.ofLEByteArray b; return f.toFloat)
+  | _ =>  t.mapM (fun b => Float.ofLEByteArray b)
+
 
 def toFloat64Tree! (arr : Tensor) : Format.Tree Float := get! $ toFloat64Tree arr
 
