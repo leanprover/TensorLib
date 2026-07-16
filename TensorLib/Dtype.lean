@@ -137,8 +137,7 @@ def join (x y : Dtype) : Option Dtype :=
       | .float16, .uint32 => float64
       | .float16, .int64 => float64
       | .float16, .uint64 => float64
-      | .float16, .bfloat16
-      | .float16, .float8_e4m3 => none
+      | .float16, .bfloat16 => none
       | .bfloat16, .float16 => none
       | .bfloat16, .float32 => float32
       | .bfloat16, .float64 => float64
