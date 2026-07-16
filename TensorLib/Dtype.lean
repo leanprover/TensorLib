@@ -333,6 +333,16 @@ private def canCastFromInt (dtype : Dtype) (n : Int) : Bool :=
 
 def sizedStrides (dtype : Dtype) (s : Shape) : Strides := List.map (fun x => x * dtype.itemsize) s.unitStrides
 
+-- Decode 1-byte fp8_e4m3 to fp32
+-- Prevent having to repeat size check at call sites
+def decodeFloat8E4M3 (arr : ByteArray) : Err Float32 :=
+  if arr.size != 1 then .error "decoder: expected 1 byte for float8_e4m3"
+  else .ok (arr.data[0]!.toFloat32FromFloat8E4M3)
+
+-- Encode Float32 to 1-byte fp8_e4m3
+def encodeFloat8E4M3 (f : Float32) : ByteArray :=
+  ByteArray.mk #[f.toFloat8E4M3Bits]
+
 def byteArrayOfNatOverflow (dtype : Dtype) (n : Nat) : ByteArray := match dtype with
 | .bool => toLEByteArray (if n == 0 then 0 else 1).toUInt8
 | .uint8 => toLEByteArray n.toUInt8
@@ -343,7 +353,7 @@ def byteArrayOfNatOverflow (dtype : Dtype) (n : Nat) : ByteArray := match dtype 
 | .int32 => toLEByteArray n.toInt32
 | .uint64 => toLEByteArray n.toUInt64
 | .int64 => toLEByteArray n.toInt64
-| .float8_e4m3 => toLEByteArray n.toFloat32.toFloat8E4M3Bits
+| .float8_e4m3 => encodeFloat8E4M3 n.toFloat32
 | .float16 => toLEByteArray n.toFloat32.toFloat16Bits
 | .bfloat16 => toLEByteArray n.toFloat32.toBFloat16Bits
 | .float32 => toLEByteArray n.toFloat32
@@ -373,7 +383,7 @@ private def byteArrayOfIntOverflow (dtype : Dtype) (n : Int) : ByteArray := matc
 | .uint16 | .int16 => toLEByteArray n.toInt16
 | .uint32 | .int32 => toLEByteArray n.toInt32
 | .uint64 | .int64 => toLEByteArray n.toInt64
-| .float8_e4m3 => toLEByteArray n.toFloat32.toFloat8E4M3Bits
+| .float8_e4m3 => encodeFloat8E4M3 n.toFloat32
 | .float16 => toLEByteArray n.toFloat32.toFloat16Bits
 | .bfloat16 => toLEByteArray n.toFloat32.toBFloat16Bits
 | .float32 => toLEByteArray n.toFloat32
@@ -480,7 +490,6 @@ private def byteArrayToFloat16RoundTrip (dtype : Dtype) (f : Float32) : Bool :=
 #guard float16.byteArrayToFloat16RoundTrip 42
 #guard float16.byteArrayToFloat16RoundTrip (-0)
 
-
 -- Decode bf16 bytes to Float32. bf16 shares fp32's exponent, so just pad mantissa with 0's.
 def byteArrayToBFloat16 (dtype : Dtype) (arr : ByteArray) : Err Float32 := match dtype with
   | .bfloat16 => arr.toUInt16LE.map UInt16.toFloat32FromBFloat16
@@ -522,9 +531,9 @@ def add (dtype : Dtype) (x y : ByteArray) : Err ByteArray :=
   | .int8 | .int16| .int32 | .int64 => do
     dtype.byteArrayOfInt (x.toInt + y.toInt)
   | .float8_e4m3 => do
-    let x := x.data[0]!.toFloat32FromFloat8E4M3
-    let y := y.data[0]!.toFloat32FromFloat8E4M3
-    return ByteArray.mk #[(x + y).toFloat8E4M3Bits]
+    let x <- decodeFloat8E4M3 x
+    let y <- decodeFloat8E4M3 y
+    return encodeFloat8E4M3 (x + y)
   | .float16
   | .bfloat16 => do
     let x <- dtype.decodeFloat16OrBFloat16 x
@@ -549,9 +558,9 @@ def sub (dtype : Dtype) (x y : ByteArray) : Err ByteArray :=
   | .int8 | .int16| .int32 | .int64 => do
     return dtype.byteArrayOfIntOverflow (x.toInt - y.toInt)
   | .float8_e4m3 => do
-    let x := x.data[0]!.toFloat32FromFloat8E4M3
-    let y := y.data[0]!.toFloat32FromFloat8E4M3
-    return ByteArray.mk #[(x - y).toFloat8E4M3Bits]
+    let x <- decodeFloat8E4M3 x
+    let y <- decodeFloat8E4M3 y
+    return encodeFloat8E4M3 (x - y)
   | .float16
   | .bfloat16 => do
     let x <- dtype.decodeFloat16OrBFloat16 x
@@ -577,9 +586,9 @@ def mul (dtype : Dtype) (x y : ByteArray) : Err ByteArray :=
   | .int8 | .int16| .int32 | .int64 => do
     return dtype.byteArrayOfIntOverflow (x.toInt * y.toInt)
   | .float8_e4m3 => do
-    let x := x.data[0]!.toFloat32FromFloat8E4M3
-    let y := y.data[0]!.toFloat32FromFloat8E4M3
-    return ByteArray.mk #[(x * y).toFloat8E4M3Bits]
+    let x <- decodeFloat8E4M3 x
+    let y <- decodeFloat8E4M3 y
+    return encodeFloat8E4M3 (x * y)
   | .float16
   | .bfloat16 => do
     let x <- dtype.decodeFloat16OrBFloat16 x
@@ -605,9 +614,9 @@ def div (dtype : Dtype) (x y : ByteArray) : Err ByteArray :=
   | .int8 | .int16| .int32 | .int64 => do
     return dtype.byteArrayOfIntOverflow (x.toInt / y.toInt)
   | .float8_e4m3 => do
-    let x := x.data[0]!.toFloat32FromFloat8E4M3
-    let y := y.data[0]!.toFloat32FromFloat8E4M3
-    return ByteArray.mk #[(x / y).toFloat8E4M3Bits]
+    let x <- decodeFloat8E4M3 x
+    let y <- decodeFloat8E4M3 y
+    return encodeFloat8E4M3 (x / y)
   | .float16
   | .bfloat16 => do
     let x <- dtype.decodeFloat16OrBFloat16 x
@@ -635,10 +644,8 @@ def abs (dtype : Dtype) (x : ByteArray) : Err ByteArray := do
   | .uint8 | .uint16 | .uint32 | .uint64 => return x
   | .int8 | .int16| .int32 | .int64 => return dtype.byteArrayOfIntOverflow x.toInt.natAbs
   | .float8_e4m3 => do
-    -- prevent malformed / empty input since abs has no size check
-    if x.size != 1 then .error "abs : byte size mismatch" else
-    let x := x.data[0]!.toFloat32FromFloat8E4M3
-    return ByteArray.mk #[x.abs.toFloat8E4M3Bits]
+    let f <- decodeFloat8E4M3 x
+    return encodeFloat8E4M3 f.abs
   | .float16
   | .bfloat16 => do
     let x <- dtype.decodeFloat16OrBFloat16 x
@@ -670,8 +677,7 @@ def isZero (dtype : Dtype) (x : ByteArray) : Err Bool := match dtype with
 | uint64 => return x.data.all fun v => v == 0
 -- We need to worry about -0, which is not all 0s in the bit pattern.
 | float8_e4m3 => do
-  if x.size != 1 then .error "isZero: byte size mismatch" else
-  let f := x.data[0]!.toFloat32FromFloat8E4M3
+  let f <- decodeFloat8E4M3 x
   return f == 0
 | float16
 | bfloat16 => do
@@ -751,43 +757,39 @@ def castOverflow (fromDtype : Dtype) (data : ByteArray) (toDtype : Dtype) : Err 
     | .float16, .bfloat16 | .bfloat16, .float16 => do
       let f <- decodeFloat16OrBFloat16 fromDtype data
       encodeFloat16OrBFloat16 toDtype f
+
     -- float8_e4m3 to unsigned integers
     | .float8_e4m3, .uint8 | .float8_e4m3, .uint16 | .float8_e4m3, .uint32 | .float8_e4m3, .uint64 => do
-      if data.size != 1 then .error "castOverflow: byte size mismatch" else
-      let f := data.data[0]!.toFloat32FromFloat8E4M3
+      let f <- decodeFloat8E4M3 data
       return toDtype.byteArrayOfNatOverflow f.toNat
     -- float8_e4m3 to signed integers
     | .float8_e4m3, .int8 | .float8_e4m3, .int16 | .float8_e4m3, .int32 | .float8_e4m3, .int64 => do
-      if data.size != 1 then .error "castOverflow: byte size mismatch" else
-      let f := data.data[0]!.toFloat32FromFloat8E4M3
+      let f <- decodeFloat8E4M3 data
       return toDtype.byteArrayOfIntOverflow f.toInt
     -- float8_e4m3 to float32
     | .float8_e4m3, .float32 => do
-      if data.size != 1 then .error "castOverflow: byte size mismatch" else
-      let f := data.data[0]!.toFloat32FromFloat8E4M3
+      let f <- decodeFloat8E4M3 data
       return toLEByteArray f
     -- float8_e4m3 to float64
     | .float8_e4m3, .float64 => do
-      if data.size != 1 then .error "castOverflow: byte size mismatch" else
-      let f := data.data[0]!.toFloat32FromFloat8E4M3
+      let f <- decodeFloat8E4M3 data
       return toLEByteArray f.toFloat
     -- float8_e4m3 to fp16/bf16
     | .float8_e4m3, .float16 | .float8_e4m3, .bfloat16 => do
-      if data.size != 1 then .error "castOverflow: byte size mismatch" else
-      let f := data.data[0]!.toFloat32FromFloat8E4M3
+      let f <- decodeFloat8E4M3 data
       encodeFloat16OrBFloat16 toDtype f
     -- float32 -> float8_e4m3
     | .float32, .float8_e4m3 => do
       let f <- Float32.ofLEByteArray data
-      return ByteArray.mk #[f.toFloat8E4M3Bits]
-    -- float64 -> float8_e4m3
+      return encodeFloat8E4M3 f
+    -- float64 -> float8_e4m3: rounds twice via fp32. Can disagree with ml_dtypes at the overflow edge (eg: 464.00000000000006)
     | .float64, .float8_e4m3 => do
       let f <- Float.ofLEByteArray data
-      return ByteArray.mk #[f.toFloat32.toFloat8E4M3Bits]
+      return encodeFloat8E4M3 f.toFloat32
     -- fp16/bf16 -> float8_e4m3
     | .float16, .float8_e4m3 | .bfloat16, .float8_e4m3 => do
       let f <- decodeFloat16OrBFloat16 fromDtype data
-      return ByteArray.mk #[f.toFloat8E4M3Bits]
+      return encodeFloat8E4M3 f
     | .float8_e4m3, .float8_e4m3 | .float16, .float16 | .bfloat16, .bfloat16 | .float32, .float32 | .float64, .float64 => impossible
 
 
@@ -858,9 +860,9 @@ private def liftFloatUnop (f32 : Float32 -> Err Float32) (f64 : Float -> Err Flo
   if data.size != dtype.itemsize then throw "incorrect byte count" else
   match dtype with
   | .float8_e4m3 => do
-      let f := data.data[0]!.toFloat32FromFloat8E4M3
-      let x <- f32 f
-      return ByteArray.mk #[x.toFloat8E4M3Bits]
+    let f <- decodeFloat8E4M3 data
+    let x <- f32 f
+    return encodeFloat8E4M3 x
   | .float16 | .bfloat16 => do
     let f <- decodeFloat16OrBFloat16 dtype data
     let x <- f32 f

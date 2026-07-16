@@ -224,8 +224,8 @@ def _root_.UInt16.toFloat32FromBFloat16 (bits : UInt16) : Float32 :=
 
 -- Convert float8_e4m3fn bits (stored as UInt8) to Float32.
 -- E4M3FN format: 1 sign bit + 4 exponent bits + 3 mantissa bits, bias = 7
--- Special values: No infinity. Exponent all 1s (0xF) with any mantissa = NaN.
---   0x7F = +NaN, 0xFF = -NaN (only two NaN encodings since mant must be 0x7)
+-- Special values: No inf. Exponent all 1's (0xF) with mantissa 0x7 = NaN; mantissa 0..6 are normal (up to 448).
+-- 0x7F = +NaN, 0xFF = -NaN (only two NaN encodings since mant must be 0x7)
 -- Max value: ±448 (bits 0x7E / 0xFE)
 -- Subnormal: exp=0, mant≠0, value = (-1)^sign × mant × 2^(1 - bias - mantissa_bits) = mant × 2^(-9)
 -- Smallest subnormal: 2^(-9) = 0.001953125
@@ -248,7 +248,8 @@ def _root_.UInt8.toFloat32FromFloat8E4M3 (bits : UInt8) : Float32 :=
       if sign == 1 then Float32.ofBits (result.toBits ||| 0x80000000) else result
   else if exp == 0xF && mant == 0x7 then
     -- Exponent all 1s: NaN (e4m3fn has NO infinity, only NaN)
-    -- We map all NaN bit patterns to fp32 quiet NaN, preserving sign
+    -- We map all NaN bit patterns to fp32 quiet NaN.
+    -- NaN sign is not preserved due to leans fp32 NaN normalization, diverging from ml_dtypes.
     Float32.ofBits (sign32 ||| 0x7FC00000)
   else
     -- Normal number: rebias exponent from e4m3 (bias=7) to fp32 (bias=127)
@@ -316,11 +317,8 @@ def _root_.Float32.toFloat8E4M3Bits (f : Float32) : UInt8 :=
       -- If rounding overflows mantissa (0b1000), bump exponent
       -- e4m3Exp is [1, 14] here so e4m3Exp + 1 is always in [2, 15] and never overflows.
       let (finalExp, finalMant) := if rounded > 0x7 then (e4m3Exp + 1, (0 : UInt32)) else (e4m3Exp, rounded)
-      -- Check if we accidentally hit NaN pattern (exp=15, mant=7)
-      if finalExp == 15 && finalMant == 7 then
-        sign8 ||| 0x7F  -- NaN
-      else
-        sign8 ||| (finalExp.toUInt8 <<< 3) ||| finalMant.toUInt8
+      -- NaN is unreachable here. Mant carry forces finalMant = 0
+      sign8 ||| (finalExp.toUInt8 <<< 3) ||| finalMant.toUInt8
     else
       -- Subnormal in e4m3: realExp < -6
       -- value = mant * 2^(-9), where mant is 1..7

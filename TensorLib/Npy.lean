@@ -125,6 +125,8 @@ def fromNpyString (s : String) : Err Dtype :=
     -- We only recognize "<V2" as bf16 to avoid collision with "|V2" (actual void data).
     -- Only littleEndian V2 is bf16. Tensor.toNpy always writes LE so this is safe.
     let name <- if nameStr == "V2" && order == .littleEndian then .ok .bfloat16
+      -- fp8_e4m3 stored as "<V1" by ml_dtypes but multiple fp8_exmy all use this representation.
+      -- Note that we use "<V1" for e4m3 only here.
       else if nameStr == "V1" && order == .littleEndian then .ok .float8_e4m3
       else dtypeNameFromNpyString nameStr
     return { name, order }
@@ -426,6 +428,8 @@ def Ndarray.save! (arr : Ndarray) (file : System.FilePath) : IO Unit :=
 -- Hermetic parse tests: no Python dependency
 #guard Npy.Dtype.fromNpyString "<V2" == .ok { name := .bfloat16, order := .littleEndian }
 #guard Npy.Dtype.fromNpyString "|V2" != .ok { name := .bfloat16, order := .littleEndian }
+#guard Npy.Dtype.fromNpyString "<V1" == .ok { name := .float8_e4m3, order := .littleEndian }
+#guard Npy.Dtype.fromNpyString "|V1" != .ok { name := .float8_e4m3, order := .littleEndian }
 
 end Npy
 end TensorLib
