@@ -146,6 +146,8 @@ def join (x y : Dtype) : Option Dtype :=
       | .float8_e4m3, .float32 => float32
       | .float8_e4m3, .float64 => float64
       | .float8_e4m3, .bool
+      -- numpy promotes int8/uint8 + fp8_e4m3 => fp8_e4m3 (lossy for values > 16, e.g. 100 -> 96)
+      -- matches ml_dtypes behavior; lossless correctly returns false for int8 to fp8_e4m3
       | .float8_e4m3, .int8
       | .float8_e4m3, .uint8 => float8_e4m3
       | .float8_e4m3, _ => none
@@ -634,6 +636,8 @@ def abs (dtype : Dtype) (x : ByteArray) : Err ByteArray := do
   | .uint8 | .uint16 | .uint32 | .uint64 => return x
   | .int8 | .int16| .int32 | .int64 => return dtype.byteArrayOfIntOverflow x.toInt.natAbs
   | .float8_e4m3 => do
+    -- prevent malformed / empty input since abs has no size check
+    if x.size != 1 then .error "abs : byte size mismatch" else
     let x := x.data[0]!.toFloat32FromFloat8E4M3
     return ByteArray.mk #[x.abs.toFloat8E4M3Bits]
   | .float16
@@ -647,6 +651,10 @@ def abs (dtype : Dtype) (x : ByteArray) : Err ByteArray := do
     let x <- dtype.byteArrayToFloat64 x
     dtype.byteArrayOfFloat64 x.abs
   | .bool => return x
+
+-- abs rejects wrong-sized input for fp8_e4m3
+#guard (Dtype.abs .float8_e4m3 (ByteArray.mk #[])).isOk == false -- 0 bytes (should be atleast 1 byte for fp8_e4m3)
+#guard (Dtype.abs .float8_e4m3 (ByteArray.mk #[1, 2])).isOk == false -- 2 bytes (too many for a 1 byte type)
 
 def abs! (dtype : Dtype) (x : ByteArray) : ByteArray := get! $ abs dtype x
 
@@ -663,6 +671,7 @@ def isZero (dtype : Dtype) (x : ByteArray) : Err Bool := match dtype with
 | uint64 => return x.data.all fun v => v == 0
 -- We need to worry about -0, which is not all 0s in the bit pattern.
 | float8_e4m3 => do
+  if x.size != 1 then .error "isZero: byte size mismatch" else
   let f := x.data[0]!.toFloat32FromFloat8E4M3
   return f == 0
 | float16
@@ -675,6 +684,10 @@ def isZero (dtype : Dtype) (x : ByteArray) : Err Bool := match dtype with
 | float64 => do
   let f <- Float.ofLEByteArray x
   return f == 0
+
+-- isZero rejects wrong-sized input for float8_e4m3
+#guard (Dtype.isZero .float8_e4m3 (ByteArray.mk #[])).isOk == false
+#guard (Dtype.isZero .float8_e4m3 (ByteArray.mk #[1, 2])).isOk == false
 
 def castOverflow (fromDtype : Dtype) (data : ByteArray) (toDtype : Dtype) : Err ByteArray :=
   if fromDtype == toDtype then return data else
@@ -741,22 +754,27 @@ def castOverflow (fromDtype : Dtype) (data : ByteArray) (toDtype : Dtype) : Err 
       encodeFloat16OrBFloat16 toDtype f
     -- float8_e4m3 to unsigned integers
     | .float8_e4m3, .uint8 | .float8_e4m3, .uint16 | .float8_e4m3, .uint32 | .float8_e4m3, .uint64 => do
+      if data.size != 1 then .error "castOverflow: byte size mismatch" else
       let f := data.data[0]!.toFloat32FromFloat8E4M3
       return toDtype.byteArrayOfNatOverflow f.toNat
     -- float8_e4m3 to signed integers
     | .float8_e4m3, .int8 | .float8_e4m3, .int16 | .float8_e4m3, .int32 | .float8_e4m3, .int64 => do
+      if data.size != 1 then .error "castOverflow: byte size mismatch" else
       let f := data.data[0]!.toFloat32FromFloat8E4M3
       return toDtype.byteArrayOfIntOverflow f.toInt
     -- float8_e4m3 to float32
     | .float8_e4m3, .float32 => do
+      if data.size != 1 then .error "castOverflow: byte size mismatch" else
       let f := data.data[0]!.toFloat32FromFloat8E4M3
       return toLEByteArray f
     -- float8_e4m3 to float64
     | .float8_e4m3, .float64 => do
+      if data.size != 1 then .error "castOverflow: byte size mismatch" else
       let f := data.data[0]!.toFloat32FromFloat8E4M3
       return toLEByteArray f.toFloat
     -- float8_e4m3 to fp16/bf16
     | .float8_e4m3, .float16 | .float8_e4m3, .bfloat16 => do
+      if data.size != 1 then .error "castOverflow: byte size mismatch" else
       let f := data.data[0]!.toFloat32FromFloat8E4M3
       encodeFloat16OrBFloat16 toDtype f
     -- float32 -> float8_e4m3

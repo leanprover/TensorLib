@@ -256,11 +256,11 @@ def _root_.UInt8.toFloat32FromFloat8E4M3 (bits : UInt8) : Float32 :=
     let newExp := exp.toUInt32 - 7 + 127
     Float32.ofBits (sign32 ||| newExp <<< 23 ||| mant.toUInt32 <<< 20)
 
--- Convert Fp32 to float8_e4m3fn bits (UInt8).
--- E4M3FN: 1 sign + 4 exponent + 3 mantissa, bias = 7
+-- Convert Fp32 to float8_e4m3 bits (UInt8).
+-- E4M3: 1 sign + 4 exponent + 3 mantissa, bias = 7
 -- Uses round-to-nearest-even on discarded mantissa bits.
--- Overflow (including ±inf) maps to NaN (0x7F / 0xFF) per ml_dtypes behavior.
--- NaN input maps to NaN (0x7F).
+-- Overflow (including +-inf) maps to NaN (0x7F / 0xFF) per ml_dtypes behavior.
+-- NaN sign is not preserved because lean's fp32 normalizes NaN to +NaN irrespective of inpit sign which diverges from ml_dtypes.
 def _root_.Float32.toFloat8E4M3Bits (f : Float32) : UInt8 :=
   let bits := f.toBits
   let sign := (bits >>> 31) &&& 1

@@ -276,7 +276,6 @@ private def testBFloat16EdgeCases : IO Bool := do
 
   return checks.all id
 
-
 -- float8_e4m3fn edge cases: decode from npy, arithmetic, and casting
 -- E4M3FN: 1 sign + 4 exponent + 3 mantissa, bias=7, max=448, no inf, only NaN
 -- verified against ml_dtypes outputs
@@ -376,6 +375,20 @@ private def testFloat8E4M3EdgeCases : IO Bool := do
   let castToE4m3 <- IO.ofExcept (Dtype.castOverflow .float32 f32_3 .float8_e4m3)
   let pass := castToE4m3 == toLEByteArray (68 : UInt8)
   IO.println s!"fp8_e4m3 fp32 to e4m3 (3.0): {pass}"
+  checks := pass :: checks
+
+  -- [448, 464] saturate to 448 (matches ml_dtypes)
+  let f32_460 := toLEByteArray (Float32.ofNat 460)
+  let castSaturate <- IO.ofExcept (Dtype.castOverflow .float32 f32_460 .float8_e4m3)
+  let pass := castSaturate == toLEByteArray (126 : UInt8)  -- 448.0
+  IO.println s!"fp8_e4m3 saturate (460 -> 448): {pass}"
+  checks := pass :: checks
+
+  -- Values >= 465 overflow to NaN (matches ml_dtypes)
+  let f32_465 := toLEByteArray (Float32.ofNat 465)
+  let castOverflow <- IO.ofExcept (Dtype.castOverflow .float32 f32_465 .float8_e4m3)
+  let pass := castOverflow == toLEByteArray (127 : UInt8)  -- NaN
+  IO.println s!"fp8_e4m3 overflow (465 -> NaN): {pass}"
   checks := pass :: checks
 
   return checks.all id
