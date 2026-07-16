@@ -607,6 +607,7 @@ def toFloat32Tree! (arr : Tensor) : Format.Tree Float32 := get! $ toFloat32Tree 
 def toFloat64Tree (arr : Tensor) : Err (Format.Tree Float) := do
   let t <- arr.toByteArrayTree
   match arr.dtype with
+  | .float8_e4m3 => t.mapM (fun b => do let f <- Dtype.decodeFloat8E4M3 b; return f.toFloat)
   | .float16 => t.mapM (fun b => do let f <- Dtype.byteArrayToFloat16 .float16 b; return f.toFloat)
   | .bfloat16 => t.mapM (fun b => do let f <- Dtype.byteArrayToBFloat16 .bfloat16 b; return f.toFloat)
   | .float32 => t.mapM (fun b => do let f <- Float32.ofLEByteArray b; return f.toFloat)
