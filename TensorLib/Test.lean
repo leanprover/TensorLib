@@ -393,12 +393,145 @@ private def testFloat8E4M3EdgeCases : IO Bool := do
 
   return checks.all id
 
+-- float8_e5m2 edge cases: decode from npy, arithmetic, and casting
+-- E5M2: 1 sign + 5 exponent + 2 mantissa, bias=15, max=57344, has inf and NaN
+-- verified against ml_dtypes outputs
+private def testFloat8E5M2EdgeCases : IO Bool := do
+  let file <- saveNumpyArray "np.array([57344.0, 0.1, -0.0, 1.52587890625e-05, 1.5, 0.5, 8.0, 2.0]).astype(__import__('ml_dtypes').float8_e5m2)"
+  let npy <- Npy.parseFile file
+  let arr <- IO.ofExcept (Tensor.ofNpy npy)
+  let _ <- IO.FS.removeFile file
+  -- Decode 1-byte e5m2 element at offset using extract
+  let decode (offset : Nat) : Err Float32 :=
+    Dtype.decodeFloat8E5M2 (arr.data.extract offset (offset + 1))
+  let mut checks : List Bool := []
+
+  -- max representable value (57344)
+  let v0 <- IO.ofExcept (decode 0)
+  let pass := v0 == Float32.ofBits 0x47600000
+  IO.println s!"fp8_e5m2 v0 (57344): {pass}"
+  checks := pass :: checks
+
+  -- 0.1 rounded in e5m2
+  let v1 <- IO.ofExcept (decode 1)
+  let diff := v1 - 0.09375
+  let pass := diff < 0.01 && diff > -0.01
+  IO.println s!"fp8_e5m2 v1 (0.1 ~ 0.09375): {pass}"
+  checks := pass :: checks
+
+  -- -0
+  let v2 <- IO.ofExcept (decode 2)
+  let pass := v2 == 0.0
+  IO.println s!"fp8_e5m2 v2 (-0): {pass}"
+  checks := pass :: checks
+
+  -- smallest subnormal: 2^(-16)
+  let v3 <- IO.ofExcept (decode 3)
+  let pass := v3 == Float32.ofBits 0x37800000
+  IO.println s!"fp8_e5m2 v3 (smallest subnormal): {pass}"
+  checks := pass :: checks
+
+  -- 1.5
+  let v4 <- IO.ofExcept (decode 4)
+  let pass := v4 == 1.5
+  IO.println s!"fp8_e5m2 v4 (1.5): {pass}"
+  checks := pass :: checks
+
+  -- 0.5
+  let v5 <- IO.ofExcept (decode 5)
+  let pass := v5 == 0.5
+  IO.println s!"fp8_e5m2 v5 (0.5): {pass}"
+  checks := pass :: checks
+
+  -- 8 = maxSafeNat
+  let v6 <- IO.ofExcept (decode 6)
+  let pass := v6 == Float32.ofNat 8
+  IO.println s!"fp8_e5m2 v6 (8): {pass}"
+  checks := pass :: checks
+
+  -- 2.0
+  let v7 <- IO.ofExcept (decode 7)
+  let pass := v7 == 2.0
+  IO.println s!"fp8_e5m2 v7 (2.0): {pass}"
+  checks := pass :: checks
+
+  -- Arithmetic: 1.5 and 2.0
+  let a := toLEByteArray (62 : UInt8)   -- e5m2 encoding of 1.5
+  let b := toLEByteArray (64 : UInt8)   -- e5m2 encoding of 2.0
+  let negA := toLEByteArray (190 : UInt8)  -- e5m2 encoding of -1.5
+
+  let pass <- checkBitsU8 "fp8_e5m2 add (1.5 + 2.0 = 3.5)" 67 (Dtype.add .float8_e5m2 a b)
+  checks := pass :: checks
+
+  let pass <- checkBitsU8 "fp8_e5m2 sub (1.5 - 2.0 = -0.5)" 184 (Dtype.sub .float8_e5m2 a b)
+  checks := pass :: checks
+
+  let pass <- checkBitsU8 "fp8_e5m2 mul (1.5 * 2.0 = 3.0)" 66 (Dtype.mul .float8_e5m2 a b)
+  checks := pass :: checks
+
+  let pass <- checkBitsU8 "fp8_e5m2 div (1.5 / 2.0 = 0.75)" 58 (Dtype.div .float8_e5m2 a b)
+  checks := pass :: checks
+
+  let pass <- checkBitsU8 "fp8_e5m2 abs (-1.5) = 1.5" 62 (Dtype.abs .float8_e5m2 negA)
+  checks := pass :: checks
+
+  -- Casting: e5m2(1.5) -> int8 = 1
+  let castToI8 <- IO.ofExcept (Dtype.castOverflow .float8_e5m2 a .int8)
+  let pass := castToI8.toNat == 1
+  IO.println s!"fp8_e5m2 cast to int8 (1.5 -> 1): {pass}"
+  checks := pass :: checks
+
+  -- e5m2(-0) -> bool = false
+  let negZero := toLEByteArray (128 : UInt8)
+  let castToBool <- IO.ofExcept (Dtype.castOverflow .float8_e5m2 negZero .bool)
+  let pass := castToBool == ByteArray.mk #[0]
+  IO.println s!"fp8_e5m2 -0 to bool (false): {pass}"
+  checks := pass :: checks
+
+  -- fp32(2.0) -> e5m2 = bits 64
+  let f32_2 := toLEByteArray (Float32.ofNat 2)
+  let castToE5m2 <- IO.ofExcept (Dtype.castOverflow .float32 f32_2 .float8_e5m2)
+  let pass := castToE5m2 == toLEByteArray (64 : UInt8)
+  IO.println s!"fp8_e5m2 fp32 to e5m2 (2.0): {pass}"
+  checks := pass :: checks
+
+  -- values > 57344 but < 65535 = max
+  let f32_60000 := toLEByteArray (Float32.ofNat 60000)
+  let castSaturate <- IO.ofExcept (Dtype.castOverflow .float32 f32_60000 .float8_e5m2)
+  let pass := castSaturate == toLEByteArray (123 : UInt8)  -- 57344
+  IO.println s!"fp8_e5m2 saturate (60000 -> 57344): {pass}"
+  checks := pass :: checks
+
+  -- Overflow to inf: >= 65535
+  let f32_65536 := toLEByteArray (Float32.ofNat 65536)
+  let castOverflow <- IO.ofExcept (Dtype.castOverflow .float32 f32_65536 .float8_e5m2)
+  let pass := castOverflow == toLEByteArray (124 : UInt8)  -- +inf
+  IO.println s!"fp8_e5m2 overflow (65536 -> inf): {pass}"
+  checks := pass :: checks
+
+  -- +inf preserved
+  let f32_inf := toLEByteArray (Float32.ofBits 0x7F800000)
+  let castInf <- IO.ofExcept (Dtype.castOverflow .float32 f32_inf .float8_e5m2)
+  let pass := castInf == toLEByteArray (124 : UInt8)
+  IO.println s!"fp8_e5m2 +inf -> +inf: {pass}"
+  checks := pass :: checks
+
+  -- -inf preserved
+  let f32_negInf := toLEByteArray (Float32.ofBits 0xFF800000)
+  let castNegInf <- IO.ofExcept (Dtype.castOverflow .float32 f32_negInf .float8_e5m2)
+  let pass := castNegInf == toLEByteArray (252 : UInt8)
+  IO.println s!"fp8_e5m2 -inf -> -inf: {pass}"
+  checks := pass :: checks
+
+  return checks.all id
+
 def runAllTests : IO Bool := do
  return (<- testTensorElementBV Dtype.uint16) &&
         (<- testTensorElementBV Dtype.uint32) &&
         (<- testFloat16EdgeCases) &&
         (<- testBFloat16EdgeCases) &&
-        (<- testFloat8E4M3EdgeCases)
+        (<- testFloat8E4M3EdgeCases) &&
+        (<- testFloat8E5M2EdgeCases)
 
 end Test
 end TensorLib
