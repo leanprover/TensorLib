@@ -340,7 +340,7 @@ def decodeFloat8E4M3 (arr : ByteArray) : Err Float32 :=
   else .ok (arr.data[0]!.toFloat32FromFloat8E4M3)
 
 -- Encode Float32 to 1-byte fp8_e4m3
-def encodeFloat8E4M3 (f : Float32) : ByteArray :=
+private def encodeFloat8E4M3 (f : Float32) : ByteArray :=
   ByteArray.mk #[f.toFloat8E4M3Bits]
 
 def byteArrayOfNatOverflow (dtype : Dtype) (n : Nat) : ByteArray := match dtype with
