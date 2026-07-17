@@ -659,7 +659,7 @@ def abs (dtype : Dtype) (x : ByteArray) : Err ByteArray := do
   | .bool => return x
 
 -- abs rejects wrong-sized input for fp8_e4m3
-#guard (Dtype.abs .float8_e4m3 (ByteArray.mk #[])).isOk == false -- 0 bytes (should be atleast 1 byte for fp8_e4m3)
+#guard (Dtype.abs .float8_e4m3 (ByteArray.mk #[])).isOk == false -- 0 bytes (should be at least 1 byte for fp8_e4m3)
 #guard (Dtype.abs .float8_e4m3 (ByteArray.mk #[1, 2])).isOk == false -- 2 bytes (too many for a 1 byte type)
 
 def abs! (dtype : Dtype) (x : ByteArray) : ByteArray := get! $ abs dtype x

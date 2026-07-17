@@ -261,7 +261,7 @@ def _root_.UInt8.toFloat32FromFloat8E4M3 (bits : UInt8) : Float32 :=
 -- E4M3: 1 sign + 4 exponent + 3 mantissa, bias = 7
 -- Uses round-to-nearest-even on discarded mantissa bits.
 -- Overflow (including +-inf) maps to NaN (0x7F / 0xFF) per ml_dtypes behavior.
--- NaN sign is not preserved because lean's fp32 normalizes NaN to +NaN irrespective of inpit sign which diverges from ml_dtypes.
+-- NaN sign is not preserved because lean's fp32 normalizes NaN to +NaN irrespective of input sign which diverges from ml_dtypes.
 def _root_.Float32.toFloat8E4M3Bits (f : Float32) : UInt8 :=
   let bits := f.toBits
   let sign := (bits >>> 31) &&& 1
@@ -286,8 +286,8 @@ def _root_.Float32.toFloat8E4M3Bits (f : Float32) : UInt8 :=
       sign8 ||| 0x7F
     else if realExp > 7 then
       -- realExp == 8: only valid if mantissa rounds to <= 0b110 (i.e. value <= 448)
-      -- e4m3 max normal: exp=14 (realExp=7), mant=0b111 → (1+7/8)*2^7 = 240? No...
-      -- Actually: exp=15 is valid for mant 0..6 (mant=7 is NaN). realExp = 15-7 = 8.
+      -- e4m3 at exp=14 (realExp=7), mant=0b111 -> (1+7/8)*2^7 = 240, but exp=15 with mant 0..6 goes up to 448.
+      -- Actually exp=15 is valid for mant 0..6 (mant=7 is NaN). realExp = 15-7 = 8.
       -- value = (1 + mant/8) * 2^8. Max = (1+6/8)*256 = 448.
       -- So realExp=8, truncated mant must be <= 6.
       -- Shift: we need 3 mantissa bits from 23 fp32 mantissa bits -> shift right by 20

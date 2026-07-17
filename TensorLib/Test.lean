@@ -284,55 +284,55 @@ private def testFloat8E4M3EdgeCases : IO Bool := do
   let npy <- Npy.parseFile file
   let arr <- IO.ofExcept (Tensor.ofNpy npy)
   let _ <- IO.FS.removeFile file
-  -- Each element is 1 byte; decode from raw byte at offset
-  let decode (offset : Nat) : Float32 := arr.data.data[offset]!.toFloat32FromFloat8E4M3
+  -- decode 1-byte fp8 element at offset using extract
+  let decode (offset : Nat) : Err Float32 := Dtype.decodeFloat8E4M3 (arr.data.extract offset (offset + 1))
   let mut checks : List Bool := []
 
   -- max representable value in e4m3fn (exp=15, mant=6 -> (1+6/8)*2^8 = 448)
-  let v0 := decode 0
+  let v0 <- IO.ofExcept (decode 0)
   let pass := v0 == Float32.ofBits 0x43E00000
   IO.println s!"fp8_e4m3 v0 (448): {pass}"
   checks := pass :: checks
 
   -- 0.1 is not exactly representable; rounds to 0.1015625 in e4m3
-  let v1 := decode 1
+  let v1 <- IO.ofExcept (decode 1)
   let diff := v1 - 0.1015625
   let pass := diff < 0.0001 && diff > -0.0001
   IO.println s!"fp8_e4m3 v1 (0.1 ~ 0.1015625): {pass}"
   checks := pass :: checks
 
   -- negative zero: IEEE 754 says -0.0 == 0.0
-  let v2 := decode 2
+  let v2 <- IO.ofExcept (decode 2)
   let pass := v2 == 0.0
   IO.println s!"fp8_e4m3 v2 (-0): {pass}"
   checks := pass :: checks
 
   -- smallest subnormal: bits=1, value = 1 * 2^(-9) = 0.001953125
-  let v3 := decode 3
+  let v3 <- IO.ofExcept (decode 3)
   let pass := v3 == Float32.ofBits 0x3B000000
   IO.println s!"fp8_e4m3 v3 (smallest subnormal): {pass}"
   checks := pass :: checks
 
   -- 1.5 is exactly representable (exp=7, mant=4 -> (1+4/8)*2^0 = 1.5)
-  let v4 := decode 4
+  let v4 <- IO.ofExcept (decode 4)
   let pass := v4 == 1.5
   IO.println s!"fp8_e4m3 v4 (1.5): {pass}"
   checks := pass :: checks
 
   -- 0.5 is exactly representable (exp=6, mant=0 -> 1.0*2^(-1) = 0.5)
-  let v5 := decode 5
+  let v5 <- IO.ofExcept (decode 5)
   let pass := v5 == 0.5
   IO.println s!"fp8_e4m3 v5 (0.5): {pass}"
   checks := pass :: checks
 
   -- 16 = 2^4 = maxSafeNat (largest consecutive integer)
-  let v6 := decode 6
+  let v6 <- IO.ofExcept (decode 6)
   let pass := v6 == Float32.ofNat 16
   IO.println s!"fp8_e4m3 v6 (16): {pass}"
   checks := pass :: checks
 
   -- 256 = 2^8, exactly representable (exp=15, mant=0)
-  let v7 := decode 7
+  let v7 <- IO.ofExcept (decode 7)
   let pass := v7 == Float32.ofNat 256
   IO.println s!"fp8_e4m3 v7 (256): {pass}"
   checks := pass :: checks
