@@ -95,7 +95,7 @@ def dtypeNameFromNpyString (s : String) : Err TensorLib.Dtype := match s with
 | "u2" => .ok .uint16
 | "u4" => .ok .uint32
 | "u8" => .ok .uint64
-| "f1" => .ok .float8_e5m2
+-- | "f1" => .ok .float8_e5m2
 | "f2" => .ok .float16
 | "f4" => .ok .float32
 | "f8" => .ok .float64
@@ -130,6 +130,7 @@ def fromNpyString (s : String) : Err Dtype :=
       -- fp8_e4m3 stored as "<V1" by ml_dtypes but multiple fp8_exmy all use this representation.
       -- Note that we use "<V1" for e4m3 only here.
       else if nameStr == "V1" && order == .littleEndian then .ok .float8_e4m3
+      else if nameStr == "f1" && order == .littleEndian then .ok .float8_e5m2
       else dtypeNameFromNpyString nameStr
     return { name, order }
 
@@ -432,6 +433,8 @@ def Ndarray.save! (arr : Ndarray) (file : System.FilePath) : IO Unit :=
 #guard Npy.Dtype.fromNpyString "|V2" != .ok { name := .bfloat16, order := .littleEndian }
 #guard Npy.Dtype.fromNpyString "<V1" == .ok { name := .float8_e4m3, order := .littleEndian }
 #guard Npy.Dtype.fromNpyString "|V1" != .ok { name := .float8_e4m3, order := .littleEndian }
+#guard Npy.Dtype.fromNpyString "<f1" == .ok { name := .float8_e5m2, order := .littleEndian }
+#guard Npy.Dtype.fromNpyString "|f1" != .ok { name := .float8_e5m2, order := .littleEndian }
 
 end Npy
 end TensorLib
