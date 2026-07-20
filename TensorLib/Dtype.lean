@@ -121,12 +121,11 @@ def itemsize (x : Dtype) : Nat := match x with
 | bfloat16 | float16 | int16 | uint16 => 2
 | bool | int8 | uint8 | float8_e4m3 | float8_e5m2 => 1
 
--- The match cases for type promotion, separated into its own function.
--- Previously this was in join with a recursive swap but adding more fp8
--- types made the match too large for — Lean needs to prove termination and derive unfold equations for recursive functions, and
--- both timed out on the large match.
+-- Previously this was inline in join with a recursive swap,
+-- but adding more fp8 types made the match too large. Lean needs to prove
+-- termination and derive unfold equations for recursive functions, and
+-- both timed out on the large match (which is monotonically growing w the dtypes).
 -- Splitting into a non-recursive helper eliminates the recursion so Lean skips those expensive steps.
--- join handles equality and the size swap, then calls this with the smaller-or-equal type on the left.
 private def joinOrdered (x y : Dtype) : Option Dtype :=
   match x, y with
   | .float16, .float32 => float32
@@ -962,6 +961,10 @@ private def liftFloatUnop (f32 : Float32 -> Err Float32) (f64 : Float -> Err Flo
                           (dtype : Dtype) (data : ByteArray) : Err ByteArray := do
   if data.size != dtype.itemsize then throw "incorrect byte count" else
   match dtype with
+  | .float8_e5m2 => do
+    let f <- decodeFloat8E5M2 data
+    let x <- f32 f
+    return encodeFloat8E5M2 x
   | .float8_e4m3 => do
     let f <- decodeFloat8E4M3 data
     let x <- f32 f
@@ -1317,6 +1320,17 @@ example (a b : UInt8) :
   let xa := toLEByteArray a
   let xb := toLEByteArray b
   Dtype.add .float8_e4m3 xa xb == Dtype.add .float8_e4m3 xb xa := by plausible
+
+-- PBT for join commutativity
+-- Since joinOrdered requires both arguments to be listed for same size types (the swap guard is triggered only when sizes differ)
+-- This PBT catches any missing direction that would silently return none instead of promoting
+/--
+info: Unable to find a counter-example
+---
+warning: declaration uses 'sorry'
+-/
+#guard_msgs in
+example (a b : Dtype) : Dtype.join a b == Dtype.join b a := by plausible
 
 
 #guard Dtype.uint8.leftShift! (ByteArray.mk #[10]) (ByteArray.mk #[1]) == ByteArray.mk #[20]
