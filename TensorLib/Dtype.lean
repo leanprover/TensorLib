@@ -433,7 +433,7 @@ private def saturatingIntOfFloat32 (dtype : Dtype) (f : Float32) : Int :=
   else if f.isNegInf then dtype.intMin
   else f.toInt
 
--- Same for fp64
+-- Saturating fp64 to Int
 private def saturatingIntOfFloat64 (dtype : Dtype) (f : Float) : Int :=
   if f.isNaN then 0
   else if f.isPosInf then dtype.intMax
@@ -444,8 +444,11 @@ private def byteArrayOfIntOverflow (dtype : Dtype) (n : Int) : ByteArray := matc
 | .bool => toLEByteArray (UInt8.ofNat (if n == 0 then 0 else 1))
 | .uint8 | .int8 => toLEByteArray n.toInt8
 | .uint16 | .int16 => toLEByteArray n.toInt16
-| .uint32 | .int32 => toLEByteArray n.toInt32
-| .uint64 | .int64 => toLEByteArray n.toInt64
+-- Saturate int32 / int64 to match numpy's behavior for finite overflow
+| .int32 => toLEByteArray (min (max n (-0x80000000)) 0x7FFFFFFF).toInt32
+| .uint32 => toLEByteArray n.toInt32
+| .int64 => toLEByteArray (min (max n (-0x8000000000000000)) 0x7FFFFFFFFFFFFFFF).toInt64
+| .uint64 => toLEByteArray n.toInt64
 | .float8_e4m3 => encodeFloat8E4M3 n.toFloat32
 | .float8_e5m2 => encodeFloat8E5M2 n.toFloat32
 | .float16 => toLEByteArray n.toFloat32.toFloat16Bits
