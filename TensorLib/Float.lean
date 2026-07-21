@@ -94,16 +94,17 @@ def _root_.Float.ofBEByteArray (arr : ByteArray) : Err Float := do
 def _root_.Float.ofLEByteArray! (arr : ByteArray) : Float := get! $ Float.ofLEByteArray arr
 def _root_.Float.ofBEByteArray! (arr : ByteArray) : Float := get! $ Float.ofBEByteArray arr
 
--- NaN and negatives (including -inf) → 0; +inf → UINT64_MAX
+-- NaN and negatives (including -inf) → 0; +inf -> UINT64_MAX
 -- Truncation in byteArrayOfNatOverflow gives correct UINT_MAX per target size
 -- (e.g. UINT64_MAX mod 256 = 255 for uint8)
 def _root_.Float32.toNat (f : Float32) : Nat :=
   if f.isNaN then 0          -- NaN -> 0
   else if f <= 0 then 0     -- -inf and negatives -> 0
+  else if f.isPosInf then 0xFFFFFFFFFFFFFFFF
   else f.toUInt64.toNat     -- +inf -> UINT64_MAX
 
--- Returns INT64_MAX/MIN for ±inf, 0 for NaN.
--- Per-dtype saturation (e.g. +inf → INT8_MAX for int8) is handled by
+-- Returns INT64_MAX/MIN for +-inf, 0 for NaN.
+-- Per-dtype saturation (e.g. +inf goes to INT8_MAX for int8) is handled by
 -- saturatingIntOfFloat32/saturatingIntOfFloat64 in the cast paths.
 def _root_.Float32.toInt (f : Float32) : Int :=
   if f.isNaN then 0
@@ -119,17 +120,20 @@ def _root_.Float32.quietNaN : Float32 := Float32.ofBits 0x7FC00000
 
 #guard Float32.quietNaN.toInt == 0
 
--- NaN and negatives (including -inf) → 0; +inf → UINT64_MAX
+-- NaN and negatives (including -inf) -> 0; +inf -> UINT64_MAX
+-- not relying on toUInt64's unspecified behavior for inf
 def _root_.Float.toNat (f : Float) : Nat :=
-  if f != f then 0
+  if f.isNaN then 0
   else if f <= 0 then 0
+  else if f.isPosInf then 0xFFFFFFFFFFFFFFFF
   else f.toUInt64.toNat
 
--- Same inf/NaN handling as Float32.toInt (see TODO comment above)
+-- Returns INT64_MAX / MIN for +-inf, 0 for NaN.
+-- Per-dtype saturation is handled by saturatingIntOfFloat64 in the cast paths.
 def _root_.Float.toInt (f : Float) : Int :=
-  if f != f then 0   -- NaN -> 0
-  else if f == Float.ofBits 0xFFF0000000000000 then -0x8000000000000000  -- -inf -> INT64_MIN
-  else if f == Float.ofBits 0x7FF0000000000000 then 0x7FFFFFFFFFFFFFFF   -- +inf -> INT64_MAX
+  if f.isNaN then 0 -- NaN -> 0
+  else if f.isNegInf then -0x8000000000000000
+  else if f.isPosInf then 0x7FFFFFFFFFFFFFFF
   else
     let neg := f <= 0
     let f := if neg then -f else f
