@@ -523,6 +523,33 @@ private def testFloat8E5M2EdgeCases : IO Bool := do
   IO.println s!"fp8_e5m2 -inf -> -inf: {pass}"
   checks := pass :: checks
 
+  -- e5m2(+inf) -> int8 = -1 (INT64_MAX truncated to int8)
+  let infBytes := toLEByteArray (124 : UInt8)  -- e5m2 +inf
+  let castInfToI8 <- IO.ofExcept (Dtype.castOverflow .float8_e5m2 infBytes .int8)
+  let pass := castInfToI8.toInt == -1
+  IO.println s!"fp8_e5m2 +inf -> int8 (-1): {pass}"
+  checks := pass :: checks
+
+  -- e5m2(-inf) -> int8 = 0 (INT64_MIN truncated to int8)
+  let negInfBytes := toLEByteArray (252 : UInt8)  -- e5m2 -inf
+  let castNegInfToI8 <- IO.ofExcept (Dtype.castOverflow .float8_e5m2 negInfBytes .int8)
+  let pass := castNegInfToI8.toInt == 0
+  IO.println s!"fp8_e5m2 -inf -> int8 (0): {pass}"
+  checks := pass :: checks
+
+  -- e5m2(NaN) -> int8 = 0
+  let nanBytes := toLEByteArray (126 : UInt8)  -- e5m2 NaN
+  let castNanToI8 <- IO.ofExcept (Dtype.castOverflow .float8_e5m2 nanBytes .int8)
+  let pass := castNanToI8.toInt == 0
+  IO.println s!"fp8_e5m2 NaN -> int8 (0): {pass}"
+  checks := pass :: checks
+
+  -- e5m2 -> e4m3: +inf -> NaN (e4m3 has no inf)
+  let castInfToE4m3 <- IO.ofExcept (Dtype.castOverflow .float8_e5m2 infBytes .float8_e4m3)
+  let pass := castInfToE4m3 == toLEByteArray (127 : UInt8)  -- e4m3 NaN
+  IO.println s!"fp8_e5m2 +inf -> e4m3 (NaN): {pass}"
+  checks := pass :: checks
+
   return checks.all id
 
 def runAllTests : IO Bool := do

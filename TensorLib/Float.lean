@@ -86,10 +86,14 @@ def _root_.Float.ofBEByteArray! (arr : ByteArray) : Float := get! $ Float.ofBEBy
 def _root_.Float32.toNat (f : Float32) : Nat := f.toUInt64.toNat
 
 def _root_.Float32.toInt (f : Float32) : Int :=
-  let neg := f <= 0
-  let f := if neg then -f else f
-  let n := Int.ofNat f.toUInt64.toNat
-  if neg then -n else n
+  if f != f then 0                                -- NaN -> 0
+  else if f == Float32.ofBits 0xFF800000 then 0   -- -inf -> 0
+  else if f == Float32.ofBits 0x7F800000 then -1  -- +inf -> -1
+  else
+    let neg := f <= 0
+    let f := if neg then -f else f
+    let n := Int.ofNat f.toUInt64.toNat
+    if neg then -n else n
 
 def _root_.Float32.quietNaN : Float32 := Float32.ofBits 0x7FC00000
 
@@ -573,7 +577,6 @@ warning: declaration uses 'sorry'
 #guard (127 : UInt8).toFloat32FromFloat8E4M3 !=  (127 : UInt8).toFloat32FromFloat8E4M3  -- +NaN
 #guard (255 : UInt8).toFloat32FromFloat8E4M3 !=  (255 : UInt8).toFloat32FromFloat8E4M3  -- -NaN
 
-
 -- fp8e4m3 encode guards
 #guard (Float32.ofBits 0x00000000).toFloat8E4M3Bits == (0 : UInt8)      -- +0
 #guard (Float32.ofBits 0x80000000).toFloat8E4M3Bits == (128 : UInt8)    -- -0
@@ -583,6 +586,11 @@ warning: declaration uses 'sorry'
 #guard (Float32.ofBits 0x43E00000).toFloat8E4M3Bits == (126 : UInt8)    -- 448.0 (max)
 #guard (Float32.ofBits 0x7F800000).toFloat8E4M3Bits == (127 : UInt8)    -- +inf -> NaN
 #guard (Float32.ofBits 0xFF800000).toFloat8E4M3Bits == (255 : UInt8)    -- -inf -> -NaN
+
+-- Float32.toInt handles inf/NaN correctly (matches numpy)
+#guard (Float32.ofBits 0xFF800000).toInt == 0    -- -inf -> 0
+#guard (Float32.ofBits 0x7F800000).toInt == -1   -- +inf -> -1
+#guard Float32.quietNaN.toInt == 0                -- NaN -> 0
 
 
 -- e4m3 round-trip: Encode as e4m3 -> decode to fp32 -> encode back
@@ -596,6 +604,19 @@ warning: declaration uses 'sorry'
   example (bits : UInt8) :
     let f := bits.toFloat32FromFloat8E4M3
     f.toFloat8E4M3Bits == bits ∨ f != f := by plausible
+
+
+-- Property: e5m2 round-trip (except NaN)
+-- Decode -> encode should give same bit
+/--
+info: Unable to find a counter-example
+---
+warning: declaration uses 'sorry'
+-/
+#guard_msgs in
+  example (bits : UInt8) :
+    let f := bits.toFloat32FromFloat8E5M2
+    f.toFloat8E5M2Bits == bits ∨ f != f := by plausible
 
 end Test
 
