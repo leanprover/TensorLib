@@ -50,8 +50,19 @@ def _root_.Float32.maxValue : Float32 := Float32.ofBits 0x7F7FFFFF
 def _root_.Float.minValue : Float := Float.ofBits 0xFFEFFFFFFFFFFFFF
 def _root_.Float.maxValue : Float := Float.ofBits 0x7FEFFFFFFFFFFFFF
 
+def _root_.Float32.isPosInf (f : Float32) : Bool := f == Float32.ofBits 0x7F800000
+def _root_.Float32.isNegInf (f : Float32) : Bool := f == Float32.ofBits 0xFF800000
+
+
+def _root_.Float.isPosInf (f : Float) : Bool := f == Float.ofBits 0x7FF0000000000000
+def _root_.Float.isNegInf (f : Float) : Bool := f == Float.ofBits 0xFFF0000000000000
+
 def _root_.Int.toFloat32 (n : Int) : Float32 := Float32.ofInt n
 def _root_.Int.toFloat64 (n : Int) : Float := Float.ofInt n
+
+-- IEEE 754 equality on infinities
+#guard (Float32.ofBits 0x7F800000).isPosInf
+#guard (Float32.ofBits 0xFF800000).isNegInf
 
 instance : ToLEByteArray Float32 where
   toLEByteArray f := toLEByteArray f.toBits
@@ -83,12 +94,21 @@ def _root_.Float.ofBEByteArray (arr : ByteArray) : Err Float := do
 def _root_.Float.ofLEByteArray! (arr : ByteArray) : Float := get! $ Float.ofLEByteArray arr
 def _root_.Float.ofBEByteArray! (arr : ByteArray) : Float := get! $ Float.ofBEByteArray arr
 
-def _root_.Float32.toNat (f : Float32) : Nat := f.toUInt64.toNat
+-- NaN and negatives (including -inf) → 0; +inf → UINT64_MAX
+-- Truncation in byteArrayOfNatOverflow gives correct UINT_MAX per target size
+-- (e.g. UINT64_MAX mod 256 = 255 for uint8)
+def _root_.Float32.toNat (f : Float32) : Nat :=
+  if f.isNaN then 0          -- NaN -> 0
+  else if f <= 0 then 0     -- -inf and negatives -> 0
+  else f.toUInt64.toNat     -- +inf -> UINT64_MAX
 
+-- Returns INT64_MAX/MIN for ±inf, 0 for NaN.
+-- Per-dtype saturation (e.g. +inf → INT8_MAX for int8) is handled by
+-- saturatingIntOfFloat32/saturatingIntOfFloat64 in the cast paths.
 def _root_.Float32.toInt (f : Float32) : Int :=
-  if f != f then 0                                -- NaN -> 0
-  else if f == Float32.ofBits 0xFF800000 then 0   -- -inf -> 0
-  else if f == Float32.ofBits 0x7F800000 then -1  -- +inf -> -1
+  if f.isNaN then 0
+  else if f.isNegInf then -0x8000000000000000 -- -inf -> INT64_MIN
+  else if f.isPosInf then 0x7FFFFFFFFFFFFFFF -- +inf -> INT64_MAX
   else
     let neg := f <= 0
     let f := if neg then -f else f
@@ -99,13 +119,22 @@ def _root_.Float32.quietNaN : Float32 := Float32.ofBits 0x7FC00000
 
 #guard Float32.quietNaN.toInt == 0
 
-def _root_.Float.toNat (f : Float) : Nat := f.toUInt64.toNat
+-- NaN and negatives (including -inf) → 0; +inf → UINT64_MAX
+def _root_.Float.toNat (f : Float) : Nat :=
+  if f != f then 0
+  else if f <= 0 then 0
+  else f.toUInt64.toNat
 
+-- Same inf/NaN handling as Float32.toInt (see TODO comment above)
 def _root_.Float.toInt (f : Float) : Int :=
-  let neg := f <= 0
-  let f := if neg then -f else f
-  let n := Int.ofNat f.toUInt64.toNat
-  if neg then -n else n
+  if f != f then 0   -- NaN -> 0
+  else if f == Float.ofBits 0xFFF0000000000000 then -0x8000000000000000  -- -inf -> INT64_MIN
+  else if f == Float.ofBits 0x7FF0000000000000 then 0x7FFFFFFFFFFFFFFF   -- +inf -> INT64_MAX
+  else
+    let neg := f <= 0
+    let f := if neg then -f else f
+    let n := Int.ofNat f.toUInt64.toNat
+    if neg then -n else n
 
 def _root_.Float.quietNaN : Float := Float.ofBits 0x7FF8000000000000
 
@@ -180,7 +209,6 @@ def _root_.Float32.toBFloat16Bits (f : Float32) : UInt16 :=
   let rounded := if roundBit == 1 && (stickyBits != 0 || top &&& 1 == 1) then top + 1 else top
   -- truncate to bf16 representation
   rounded.toUInt16
-
 
 
 -- Convert float16 bits (stored as UInt) to float32.
@@ -587,10 +615,22 @@ warning: declaration uses 'sorry'
 #guard (Float32.ofBits 0x7F800000).toFloat8E4M3Bits == (127 : UInt8)    -- +inf -> NaN
 #guard (Float32.ofBits 0xFF800000).toFloat8E4M3Bits == (255 : UInt8)    -- -inf -> -NaN
 
--- Float32.toInt handles inf/NaN correctly (matches numpy)
-#guard (Float32.ofBits 0xFF800000).toInt == 0    -- -inf -> 0
-#guard (Float32.ofBits 0x7F800000).toInt == -1   -- +inf -> -1
-#guard Float32.quietNaN.toInt == 0                -- NaN -> 0
+-- Float32.toInt handles inf/NaN correctly (matches numpy's int64 saturation)
+#guard (Float32.ofBits 0xFF800000).toInt == -0x8000000000000000  -- -inf -> INT64_MIN
+#guard (Float32.ofBits 0x7F800000).toInt == 0x7FFFFFFFFFFFFFFF   -- +inf -> INT64_MAX
+#guard Float32.quietNaN.toInt == 0  -- NaN -> 0
+
+
+#guard (Float32.ofBits 0x7F800000).toNat == 0xFFFFFFFFFFFFFFFF  -- +inf -> UINT64_MAX
+#guard (Float32.ofBits 0xFF800000).toNat == 0  -- -inf -> 0
+#guard Float32.quietNaN.toNat == 0  -- NaN -> 0
+
+#guard (Float.ofBits 0x7FF0000000000000).toNat == 0xFFFFFFFFFFFFFFFF  -- +inf -> UINT64_MAX
+#guard (Float.ofBits 0xFFF0000000000000).toNat == 0                    -- -inf -> 0
+#guard Float.quietNaN.toNat == 0                                       -- NaN -> 0
+#guard (Float.ofBits 0xFFF0000000000000).toInt == -0x8000000000000000  -- -inf -> INT64_MIN
+#guard (Float.ofBits 0x7FF0000000000000).toInt == 0x7FFFFFFFFFFFFFFF   -- +inf -> INT64_MAX
+#guard Float.quietNaN.toInt == 0                                       -- NaN -> 0
 
 
 -- e4m3 round-trip: Encode as e4m3 -> decode to fp32 -> encode back

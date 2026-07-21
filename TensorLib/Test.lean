@@ -526,15 +526,15 @@ private def testFloat8E5M2EdgeCases : IO Bool := do
   -- e5m2(+inf) -> int8 = -1 (INT64_MAX truncated to int8)
   let infBytes := toLEByteArray (124 : UInt8)  -- e5m2 +inf
   let castInfToI8 <- IO.ofExcept (Dtype.castOverflow .float8_e5m2 infBytes .int8)
-  let pass := castInfToI8.toInt == -1
-  IO.println s!"fp8_e5m2 +inf -> int8 (-1): {pass}"
+  let pass := castInfToI8.toInt == 127
+  IO.println s!"fp8_e5m2 +inf -> int8 (127): {pass}"
   checks := pass :: checks
 
-  -- e5m2(-inf) -> int8 = 0 (INT64_MIN truncated to int8)
+  -- e5m2(-inf) -> int8 = -128
   let negInfBytes := toLEByteArray (252 : UInt8)  -- e5m2 -inf
   let castNegInfToI8 <- IO.ofExcept (Dtype.castOverflow .float8_e5m2 negInfBytes .int8)
-  let pass := castNegInfToI8.toInt == 0
-  IO.println s!"fp8_e5m2 -inf -> int8 (0): {pass}"
+  let pass := castNegInfToI8.toInt == -128
+  IO.println s!"fp8_e5m2 -inf -> int8 (-128): {pass}"
   checks := pass :: checks
 
   -- e5m2(NaN) -> int8 = 0
@@ -548,6 +548,24 @@ private def testFloat8E5M2EdgeCases : IO Bool := do
   let castInfToE4m3 <- IO.ofExcept (Dtype.castOverflow .float8_e5m2 infBytes .float8_e4m3)
   let pass := castInfToE4m3 == toLEByteArray (127 : UInt8)  -- e4m3 NaN
   IO.println s!"fp8_e5m2 +inf -> e4m3 (NaN): {pass}"
+  checks := pass :: checks
+
+  -- e5m2(+inf) -> uint8 = 255 (UINT64_MAX truncated to uint8)
+  let castInfToU8 <- IO.ofExcept (Dtype.castOverflow .float8_e5m2 infBytes .uint8)
+  let pass := castInfToU8.toNat == 255
+  IO.println s!"fp8_e5m2 +inf -> uint8 (255): {pass}"
+  checks := pass :: checks
+
+  -- e5m2(-inf) -> uint8 = 0
+  let castNegInfToU8 <- IO.ofExcept (Dtype.castOverflow .float8_e5m2 negInfBytes .uint8)
+  let pass := castNegInfToU8.toNat == 0
+  IO.println s!"fp8_e5m2 -inf -> uint8 (0): {pass}"
+  checks := pass :: checks
+
+  -- e5m2(+inf) -> int32: we give 2147483647, numpy gives INT32_MAX
+  let castInfToI32 <- IO.ofExcept (Dtype.castOverflow .float8_e5m2 infBytes .int32)
+  let pass := castInfToI32.toInt == 2147483647
+  IO.println s!"fp8_e5m2 +inf -> int32 (2147483647, numpy gives INT32_MAX): {pass}"
   checks := pass :: checks
 
   return checks.all id
