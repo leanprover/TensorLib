@@ -109,6 +109,26 @@ def isUint (x : Dtype) : Bool := match x with
 
 def isIntLike (x : Dtype) : Bool := x.isInt || x.isUint
 
+-- when we cast +inf -> int32, we can saturate to INT32_MAX (2147483647)
+-- the max value that int32 can hold.
+def intMin (x : Dtype) : Int := match x with
+| .int8   => -128
+| .int16  => -32768
+| .int32  => -2147483648
+| .int64  => -9223372036854775808
+| _  => 0
+
+def intMax (x : Dtype) : Int := match x with
+| .int8   => 127
+| .int16  => 32767
+| .int32  => 2147483647
+| .int64  => 9223372036854775807
+| .uint8  => 255
+| .uint16 => 65535
+| .uint32 => 4294967295
+| .uint64 => 18446744073709551615
+| _ => 0
+
 -- Added float16 and bfloat16 so bitwise op know to reject it
 def isFloat (x : Dtype) : Bool := match x with
 | .float16 | .bfloat16 | .float32 | .float64 | .float8_e4m3 | float8_e5m2 => true
@@ -405,6 +425,21 @@ private def byteArrayToNatRoundTrip (dtype : Dtype) (n : Nat) : Bool :=
 #guard uint8.byteArrayToNatRoundTrip 255
 #guard !uint8.byteArrayToNatRoundTrip 256
 
+-- Saturating fp32 to Int, depends on target integer dtype.
+-- +inf -> intMax, -inf -> intMin, NaN -> 0, finite -> f.toInt
+private def saturatingIntOfFloat32 (dtype : Dtype) (f : Float32) : Int :=
+  if f.isNaN then 0
+  else if f.isPosInf then dtype.intMax
+  else if f.isNegInf then dtype.intMin
+  else f.toInt
+
+-- Same for fp64
+private def saturatingIntOfFloat64 (dtype : Dtype) (f : Float) : Int :=
+  if f.isNaN then 0
+  else if f.isPosInf then dtype.intMax
+  else if f.isNegInf then dtype.intMin
+  else f.toInt
+
 private def byteArrayOfIntOverflow (dtype : Dtype) (n : Int) : ByteArray := match dtype with
 | .bool => toLEByteArray (UInt8.ofNat (if n == 0 then 0 else 1))
 | .uint8 | .int8 => toLEByteArray n.toInt8
@@ -417,6 +452,7 @@ private def byteArrayOfIntOverflow (dtype : Dtype) (n : Int) : ByteArray := matc
 | .bfloat16 => toLEByteArray n.toFloat32.toBFloat16Bits
 | .float32 => toLEByteArray n.toFloat32
 | .float64 => toLEByteArray n.toFloat64
+
 
 def byteArrayOfInt (dtype : Dtype) (n : Int) : Err ByteArray :=
   if dtype.canCastFromInt n then .ok (dtype.byteArrayOfIntOverflow n)
@@ -765,13 +801,13 @@ def castOverflow (fromDtype : Dtype) (data : ByteArray) (toDtype : Dtype) : Err 
       return toDtype.byteArrayOfNatOverflow f.toNat
     | .float32, .int8 | .float32, .int16 | .float32, .int32 | .float32, .int64 => do
       let f <- Float32.ofLEByteArray data
-      return toDtype.byteArrayOfIntOverflow f.toInt
+      return toDtype.byteArrayOfIntOverflow (saturatingIntOfFloat32 toDtype f)
     | .float64, .uint8 | .float64, .uint16 | .float64, .uint32 | .float64, .uint64 => do
       let f <- Float.ofLEByteArray data
       return toDtype.byteArrayOfNatOverflow f.toNat
     | .float64, .int8 | .float64, .int16 | .float64, .int32 | .float64, .int64 => do
       let f <- Float.ofLEByteArray data
-      return toDtype.byteArrayOfIntOverflow f.toInt
+      return toDtype.byteArrayOfIntOverflow (saturatingIntOfFloat64 toDtype f)
     | .float32, .float64 => do
       let f <- Float32.ofLEByteArray data
       return toLEByteArray f.toFloat
@@ -787,7 +823,7 @@ def castOverflow (fromDtype : Dtype) (data : ByteArray) (toDtype : Dtype) : Err 
     | .float16, .int8 | .float16, .int16 | .float16, .int32 | .float16, .int64
     | .bfloat16, .int8 | .bfloat16, .int16 | .bfloat16, .int32 | .bfloat16, .int64 => do
       let f <- decodeFloat16OrBFloat16 fromDtype data
-      return toDtype.byteArrayOfIntOverflow f.toInt
+      return toDtype.byteArrayOfIntOverflow (saturatingIntOfFloat32 toDtype f)
     -- fp16/bf16 to float32
     | .float16, .float32 | .bfloat16, .float32 => do
       let f <- decodeFloat16OrBFloat16 fromDtype data
@@ -816,7 +852,7 @@ def castOverflow (fromDtype : Dtype) (data : ByteArray) (toDtype : Dtype) : Err 
     -- float8_e4m3 to signed integers
     | .float8_e4m3, .int8 | .float8_e4m3, .int16 | .float8_e4m3, .int32 | .float8_e4m3, .int64 => do
       let f <- decodeFloat8E4M3 data
-      return toDtype.byteArrayOfIntOverflow f.toInt
+      return toDtype.byteArrayOfIntOverflow (saturatingIntOfFloat32 toDtype f)
     -- float8_e4m3 to float32
     | .float8_e4m3, .float32 => do
       let f <- decodeFloat8E4M3 data
@@ -855,7 +891,7 @@ def castOverflow (fromDtype : Dtype) (data : ByteArray) (toDtype : Dtype) : Err 
     | .float8_e5m2, .int32
     | .float8_e5m2, .int64 => do
       let f <- decodeFloat8E5M2 data
-      return toDtype.byteArrayOfIntOverflow f.toInt
+      return toDtype.byteArrayOfIntOverflow (saturatingIntOfFloat32 toDtype f)
     -- float8_e5m2 to float32
     | .float8_e5m2, .float32 => do
       let f <- decodeFloat8E5M2 data
