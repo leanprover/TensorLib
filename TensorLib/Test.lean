@@ -523,7 +523,6 @@ private def testFloat8E5M2EdgeCases : IO Bool := do
   IO.println s!"fp8_e5m2 -inf -> -inf: {pass}"
   checks := pass :: checks
 
-  -- e5m2(+inf) -> int8 = -1 (INT64_MAX truncated to int8)
   let infBytes := toLEByteArray (124 : UInt8)  -- e5m2 +inf
   let castInfToI8 <- IO.ofExcept (Dtype.castOverflow .float8_e5m2 infBytes .int8)
   let pass := castInfToI8.toInt == 127
@@ -562,10 +561,10 @@ private def testFloat8E5M2EdgeCases : IO Bool := do
   IO.println s!"fp8_e5m2 -inf -> uint8 (0): {pass}"
   checks := pass :: checks
 
-  -- e5m2(+inf) -> int32: we give 2147483647, numpy gives INT32_MAX
+  -- e5m2(+inf) -> int32: numpy gives INT32_MAX
   let castInfToI32 <- IO.ofExcept (Dtype.castOverflow .float8_e5m2 infBytes .int32)
   let pass := castInfToI32.toInt == 2147483647
-  IO.println s!"fp8_e5m2 +inf -> int32 (2147483647, numpy gives INT32_MAX): {pass}"
+  IO.println s!"fp8_e5m2 +inf -> int32 (INT32_MAX): {pass}"
   checks := pass :: checks
 
   return checks.all id
