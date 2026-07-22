@@ -580,6 +580,13 @@ private def testFloat8E5M2EdgeCases : IO Bool := do
   IO.println s!"fp32(-1e10) -> uint32 (0): {pass}"
   checks := pass :: checks
 
+  -- fp64 finite overflow: float64(1e10) -> uint32 saturates to UINT32_MAX
+  let bigF64 := toLEByteArray (10000000000.0 : Float)  -- 1e10
+  let castBigF64 <- IO.ofExcept (Dtype.castOverflow .float64 bigF64 .uint32)
+  let pass := castBigF64.toNat == 4294967295
+  IO.println s!"fp64(1e10) -> uint32 (UINT32_MAX): {pass}"
+  checks := pass :: checks
+
   return checks.all id
 
 def runAllTests : IO Bool := do
