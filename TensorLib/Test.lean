@@ -566,6 +566,20 @@ private def testFloat8E5M2EdgeCases : IO Bool := do
   IO.println s!"fp8_e5m2 +inf -> int32 (INT32_MAX): {pass}"
   checks := pass :: checks
 
+  -- Finite overflow: float32(1e10) to uint32 saturates to UINT32_MAX
+  let bigF32 := toLEByteArray (Float32.ofNat 10000000000)
+  let castBig <- IO.ofExcept (Dtype.castOverflow .float32 bigF32 .uint32)
+  let pass := castBig.toNat == 4294967295
+  IO.println s!"fp32(1e10) -> uint32 (UINT32_MAX): {pass}"
+  checks := pass :: checks
+
+  -- Negative large: float32(-1e10) to uint32 clamps to 0
+  let negBigF32 := toLEByteArray (Float32.ofNat 10000000000).neg
+  let castNegBig <- IO.ofExcept (Dtype.castOverflow .float32 negBigF32 .uint32)
+  let pass := castNegBig.toNat == 0
+  IO.println s!"fp32(-1e10) -> uint32 (0): {pass}"
+  checks := pass :: checks
+
   return checks.all id
 
 def runAllTests : IO Bool := do
