@@ -424,12 +424,15 @@ private def byteArrayToNatRoundTrip (dtype : Dtype) (n : Nat) : Bool :=
 #guard uint8.byteArrayToNatRoundTrip 5
 #guard uint8.byteArrayToNatRoundTrip 255
 #guard !uint8.byteArrayToNatRoundTrip 256
--- Saturating fp32 → Nat, keyed on target unsigned dtype.
+
+private def uintOverflowThreshold : Float := 9223372036854775808.0  -- 2^63, boundary of toUInt64 UB
+
+-- Saturating fp32 -> Nat, depending on target unsigned dtype.
 -- +inf -> uintMax, -inf/NaN -> 0 for all sizes.
--- Finite overflow: saturate for uint32/uint64 (matches numpy),
--- wrap for uint8/uint16 via signed truncation
--- Negative finite: wrap for uint8/uint16, clamp to 0 for uint32/uint64.
--- Note: numpy's float -> uint for out of range is platform dependent so we match observed x86 behavior.
+-- Positive finite: saturate to uintMax for uint32/uint64; wrap mod 2^N for uint8/uint16.
+-- Negative finite: clamp to 0 for uint32/uint64; wrap mod 2^N for uint8/uint16.
+-- Note: numpy's float -> uint out-of-range is platform-dependent (RuntimeWarning).
+-- We match observed x86-64 behavior.
 private def saturatingNatOfFloat32 (dtype : Dtype) (f : Float32) : Nat :=
   if f.isNaN then 0
   else if f.isPosInf then dtype.intMax.toNat
@@ -438,17 +441,17 @@ private def saturatingNatOfFloat32 (dtype : Dtype) (f : Float32) : Nat :=
     match dtype with
     | .uint32 | .uint64 =>
       if f <= 0 then 0
-      -- values >= 2^64 would overflow to UInt64 (undefined behavior)
-      else if f.toFloat >= 18446744073709551616.0 then dtype.intMax.toNat
+      -- values >= 2^63 would overflow to UInt64 (undefined behavior)
+      else if f.toFloat >= uintOverflowThreshold then dtype.intMax.toNat
       else min f.toNat dtype.intMax.toNat
     | .uint8 =>
-      -- Wrap via signed truncation mod 256 (matches numpy's C cast behavior)
-      let n := f.toInt % 256
-      if n < 0 then (n + 256).toNat else n.toNat
+      if f.toFloat >= uintOverflowThreshold then 255        -- large positive -> UINT8_MAX
+      else if f.toFloat <= -uintOverflowThreshold then 0    -- large negative -> 0
+      else (f.toInt % 256).toNat
     | .uint16 =>
-      -- Wrap via signed truncation mod 65536
-      let n := f.toInt % 65536
-      if n < 0 then (n + 65536).toNat else n.toNat
+      if f.toFloat >= uintOverflowThreshold then 65535      -- large positive -> UINT16_MAX
+      else if f.toFloat <= -uintOverflowThreshold then 0    -- large negative -> 0
+      else (f.toInt % 65536).toNat
     | _ => f.toNat
 
 -- Same for fp64
@@ -460,14 +463,16 @@ private def saturatingNatOfFloat64 (dtype : Dtype) (f : Float) : Nat :=
     match dtype with
     | .uint32 | .uint64 =>
       if f <= 0 then 0
-      else if f >= 18446744073709551616.0 then dtype.intMax.toNat
+      else if f >= uintOverflowThreshold then dtype.intMax.toNat
       else min f.toNat dtype.intMax.toNat
     | .uint8 =>
-      let n := f.toInt % 256
-      if n < 0 then (n + 256).toNat else n.toNat
+      if f >= uintOverflowThreshold then 255
+      else if f <= -uintOverflowThreshold then 0
+      else (f.toInt % 256).toNat
     | .uint16 =>
-      let n := f.toInt % 65536
-      if n < 0 then (n + 65536).toNat else n.toNat
+      if f >= uintOverflowThreshold then 65535
+      else if f <= -uintOverflowThreshold then 0
+      else (f.toInt % 65536).toNat
     | _ => f.toNat
 -- Saturating fp32 to Int, depends on target integer dtype.
 -- +inf -> intMax, -inf -> intMin, NaN -> 0
@@ -1434,6 +1439,14 @@ example (a b : Dtype) : Dtype.join a b == Dtype.join b a := by plausible
 #guard !(Dtype.uint16.leftShift (ByteArray.mk #[0x1]) (ByteArray.mk #[1])).isOk
 #guard !(Dtype.float32.leftShift (ByteArray.mk #[0x1, 0, 0, 0]) (ByteArray.mk #[1])).isOk
 #guard !(Dtype.float64.leftShift (ByteArray.mk #[0x1, 0, 0, 0, 0, 0, 0, 0]) (ByteArray.mk #[1])).isOk
+
+-- Negative float -> uint8 wraps via Euclidean mod (matches observed numpy x86 behavior)
+#guard Dtype.castOverflow .float32 (toLEByteArray (-1.0 : Float32)) .uint8 == .ok (ByteArray.mk #[255])
+#guard Dtype.castOverflow .float32 (toLEByteArray (-5.0 : Float32)) .uint8 == .ok (ByteArray.mk #[251])
+
+-- Large-magnitude float → uint8/uint16 (avoids toUInt64 UB for |f| >= 2^63)
+#guard Dtype.castOverflow .float32 (toLEByteArray Float32.maxValue) .uint8 == .ok (ByteArray.mk #[255])
+#guard Dtype.castOverflow .float32 (toLEByteArray Float32.minValue) .uint8 == .ok (ByteArray.mk #[0])
 
 end Test
 
