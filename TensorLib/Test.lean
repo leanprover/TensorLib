@@ -261,11 +261,10 @@ private def testBFloat16EdgeCases : IO Bool := do
   IO.println s!"bf16 inf to fp32: {pass}"
   checks := pass :: checks
 
-  -- Cast: bf16(-1.5) -> uint8 (NOTE: diverges from numpy which gives 255 via wrapping)
-  -- Lean's Float32.toNat forces negatives to 0
+  -- Cast: bf16(-1.5) -> uint8 (wraps via signed truncation mod 256, matches numpy)
   let castNegToU8 <- IO.ofExcept (Dtype.castOverflow .bfloat16 negA .uint8)
-  let pass := castNegToU8.toNat == 0
-  IO.println s!"bf16 cast -1.5 to uint8 (clamped to 0): {pass}"
+  let pass := castNegToU8.toNat == 255
+  IO.println s!"bf16 cast -1.5 to uint8 (255, wraps): {pass}"
   checks := pass :: checks
 
   -- Cast: bf16(inf) -> uint8 = 255 in both lean and numpy
