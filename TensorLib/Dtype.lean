@@ -427,8 +427,9 @@ private def byteArrayToNatRoundTrip (dtype : Dtype) (n : Nat) : Bool :=
 -- Saturating fp32 → Nat, keyed on target unsigned dtype.
 -- +inf -> uintMax, -inf/NaN -> 0 for all sizes.
 -- Finite overflow: saturate for uint32/uint64 (matches numpy),
--- wrap for uint8/uint16 (also matches numpy's C cast behavior).
+-- wrap for uint8/uint16 via signed truncation
 -- Negative finite: wrap for uint8/uint16, clamp to 0 for uint32/uint64.
+-- Note: numpy's float -> uint for out of range is platform dependent so we match observed x86 behavior.
 private def saturatingNatOfFloat32 (dtype : Dtype) (f : Float32) : Nat :=
   if f.isNaN then 0
   else if f.isPosInf then dtype.intMax.toNat
@@ -437,7 +438,17 @@ private def saturatingNatOfFloat32 (dtype : Dtype) (f : Float32) : Nat :=
     match dtype with
     | .uint32 | .uint64 =>
       if f <= 0 then 0
+      -- values >= 2^64 would overflow to UInt64 (undefined behavior)
+      else if f.toFloat >= 18446744073709551616.0 then dtype.intMax.toNat
       else min f.toNat dtype.intMax.toNat
+    | .uint8 =>
+      -- Wrap via signed truncation mod 256 (matches numpy's C cast behavior)
+      let n := f.toInt % 256
+      if n < 0 then (n + 256).toNat else n.toNat
+    | .uint16 =>
+      -- Wrap via signed truncation mod 65536
+      let n := f.toInt % 65536
+      if n < 0 then (n + 65536).toNat else n.toNat
     | _ => f.toNat
 
 -- Same for fp64
@@ -449,11 +460,18 @@ private def saturatingNatOfFloat64 (dtype : Dtype) (f : Float) : Nat :=
     match dtype with
     | .uint32 | .uint64 =>
       if f <= 0 then 0
+      else if f >= 18446744073709551616.0 then dtype.intMax.toNat
       else min f.toNat dtype.intMax.toNat
+    | .uint8 =>
+      let n := f.toInt % 256
+      if n < 0 then (n + 256).toNat else n.toNat
+    | .uint16 =>
+      let n := f.toInt % 65536
+      if n < 0 then (n + 65536).toNat else n.toNat
     | _ => f.toNat
 -- Saturating fp32 to Int, depends on target integer dtype.
 -- +inf -> intMax, -inf -> intMin, NaN -> 0
--- finite overflow: satuate for int32/64 as per numpy
+-- finite overflow: saturate for int32/64 as per numpy
 -- wrap for int8/16 (numpy)
 private def saturatingIntOfFloat32 (dtype : Dtype) (f : Float32) : Int :=
   if f.isNaN then 0
@@ -471,7 +489,7 @@ private def saturatingIntOfFloat64 (dtype : Dtype) (f : Float) : Int :=
   else if f.isNegInf then dtype.intMin
   else
     match dtype with
-    | .int64 | .uint64 => min (max f.toInt dtype.intMin) dtype.intMax
+    | .int32 | .int64 => min (max f.toInt dtype.intMin) dtype.intMax
     | _ => f.toInt
 
 private def byteArrayOfIntOverflow (dtype : Dtype) (n : Int) : ByteArray := match dtype with
