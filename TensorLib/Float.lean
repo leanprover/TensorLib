@@ -787,6 +787,17 @@ warning: declaration uses 'sorry'
     let f := bits.toFloat32FromFloat8E5M2
     f.toFloat8E5M2Bits == bits ∨ f != f := by plausible
 
+-- Property: e3m4 round-trip (except NaN)
+-- Decode -> encode should give same bits
+/--
+info: Unable to find a counter-example
+---
+warning: declaration uses 'sorry'
+-/
+#guard_msgs in
+  example (bits : UInt8) :
+    let f := bits.toFloat32FromFloat8E3M4
+    f.toFloat8E3M4Bits == bits ∨ f != f := by plausible
 end Test
 
 end TensorLib

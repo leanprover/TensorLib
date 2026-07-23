@@ -1527,6 +1527,18 @@ example (a b : UInt8) :
   let xb := toLEByteArray b
   Dtype.add .float8_e4m3 xa xb == Dtype.add .float8_e4m3 xb xa := by plausible
 
+-- Property: e3m4 addition is commutative (a + b == b + a)
+/--
+info: Unable to find a counter-example
+---
+warning: declaration uses 'sorry'
+-/
+#guard_msgs in
+example (a b : UInt8) :
+  let xa := toLEByteArray a
+  let xb := toLEByteArray b
+  Dtype.add .float8_e3m4 xa xb == Dtype.add .float8_e3m4 xb xa := by plausible
+
 -- PBT for join commutativity
 -- Since joinOrdered requires both arguments to be listed for same size types (the swap guard is triggered only when sizes differ)
 -- This PBT catches any missing direction that would silently return none instead of promoting
