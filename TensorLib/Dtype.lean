@@ -37,6 +37,7 @@ inductive Dtype where
 | uint32
 | uint64
 | float8_e4m3
+| float8_e3m4
 | float8_e5m2
 | float16
 | bfloat16
@@ -86,6 +87,7 @@ instance : ToString Dtype where
   | uint32 => "uint32"
   | uint64 => "uint64"
   | float8_e4m3 => "float8_e4m3fn"
+  | float8_e3m4 => "float8_e3m4"
   | float8_e5m2 => "float8_e5m2" -- no fn since e5m2 has infinity
   | float16 => "float16"
   | bfloat16 => "bfloat16"
@@ -94,7 +96,7 @@ instance : ToString Dtype where
 
 
 def isOneByte (x : Dtype) : Bool := match x with
-| bool | int8 | uint8 | float8_e4m3 | float8_e5m2 => true
+| bool | int8 | uint8 | float8_e4m3 | float8_e3m4 | float8_e5m2 => true
 | _ => false
 
 def isMultiByte (x : Dtype) : Bool := ! x.isOneByte
@@ -131,7 +133,7 @@ def intMax (x : Dtype) : Int := match x with
 
 -- Added float16 and bfloat16 so bitwise op know to reject it
 def isFloat (x : Dtype) : Bool := match x with
-| .float16 | .bfloat16 | .float32 | .float64 | .float8_e4m3 | float8_e5m2 => true
+| .float16 | .bfloat16 | .float32 | .float64 | .float8_e4m3 | .float8_e3m4 | float8_e5m2 => true
 | _ => false
 
 --! Number of bytes used by each element of the given dtype
@@ -139,7 +141,7 @@ def itemsize (x : Dtype) : Nat := match x with
 | float64 | int64 | uint64 => 8
 | float32 | int32 | uint32 => 4
 | bfloat16 | float16 | int16 | uint16 => 2
-| bool | int8 | uint8 | float8_e4m3 | float8_e5m2 => 1
+| bool | int8 | uint8 | float8_e4m3 | float8_e3m4 | float8_e5m2 => 1
 
 -- Previously this was inline in join with a recursive swap,
 -- but adding more fp8 types made the match too large. Lean needs to prove
@@ -180,6 +182,13 @@ private def joinOrdered (x y : Dtype) : Option Dtype :=
   | .float8_e5m2, .int8 => float8_e5m2
   | .float8_e5m2, .uint8 => float8_e5m2
   | .float8_e5m2, _ => none
+  | .float8_e3m4, .float32 => float32
+  | .float8_e3m4, .float64 => float64
+  | .float8_e3m4, bool
+  | .float8_e3m4, .int8
+  | .float8_e3m4, .uint8
+  | .float8_e3m4, .float8_e4m3 => float8_e3m4 -- e3m4 absorbs e4m3 (since e3m4 has 4 mantissa bits vs e4m3's 3)
+  | .float8_e3m4, _ => none
   | .float32, .float64 => float64
   | .float32, _
   | _, .float32 => none
@@ -294,6 +303,11 @@ def lossless (fromDtype toDtype : Dtype) : Bool := match fromDtype, toDtype with
 | .float8_e5m2, .float32
 | .float8_e5m2, .float64 => true
 | .float8_e5m2, _ => false
+| .float8_e3m4, .float8_e3m4
+| .float8_e3m4, .float8_e4m3
+| .float8_e3m4, .float32
+| .float8_e3m4, .float64 => true
+| .float8_e3m4, _ => false
 | .float32, .float32
 | .float32, .float64 => true
 | .float32, _ => false
@@ -338,6 +352,7 @@ private def maxSafeNat : Dtype -> Option Nat
 | .uint64 => some 0xFFFFFFFFFFFFFFFF
 | .int64 => some 0x7FFFFFFFFFFFFFFF
 | .float8_e4m3 => maxSafeNatForFloat8e4m3
+| .float8_e3m4 => maxSafeNatForFloat8e3m4
 | .float8_e5m2 => maxSafeNatForFloat8e5m2
 | .float16 => maxSafeNatForFloat16
 | .bfloat16 => maxSafeNatForBFloat16
@@ -359,6 +374,7 @@ private def minSafeInt : Dtype -> Option Int
 | .int32 => some (-0x80000000)
 | .int64 => some (-0x8000000000000000)
 | .float8_e4m3 => some (-maxSafeNatForFloat8e4m3)
+| .float8_e3m4 => some (-maxSafeNatForFloat8e3m4)
 | .float8_e5m2 => some (-maxSafeNatForFloat8e5m2)
 | .float16 => some (-maxSafeNatForFloat16)
 | .bfloat16 => some (-maxSafeNatForBFloat16)
@@ -390,6 +406,13 @@ def decodeFloat8E5M2 (arr : ByteArray) : Err Float32 :=
 private def encodeFloat8E5M2 (f : Float32) : ByteArray :=
   ByteArray.mk #[f.toFloat8E5M2Bits]
 
+def decodeFloat8E3M4 (arr : ByteArray) : Err Float32 :=
+  if arr.size != 1 then .error "decoder: expected 1 byte for float8_e3m4"
+  else .ok (arr.data[0]!.toFloat32FromFloat8E3M4)
+
+private def encodeFloat8E3M4 (f : Float32) : ByteArray :=
+  ByteArray.mk #[f.toFloat8E3M4Bits]
+
 def byteArrayOfNatOverflow (dtype : Dtype) (n : Nat) : ByteArray := match dtype with
 | .bool => toLEByteArray (if n == 0 then 0 else 1).toUInt8
 | .uint8 => toLEByteArray n.toUInt8
@@ -401,6 +424,7 @@ def byteArrayOfNatOverflow (dtype : Dtype) (n : Nat) : ByteArray := match dtype 
 | .uint64 => toLEByteArray n.toUInt64
 | .int64 => toLEByteArray n.toInt64
 | .float8_e4m3 => encodeFloat8E4M3 n.toFloat32
+| .float8_e3m4 => encodeFloat8E3M4 n.toFloat32
 | .float8_e5m2 => encodeFloat8E5M2 n.toFloat32
 | .float16 => toLEByteArray n.toFloat32.toFloat16Bits
 | .bfloat16 => toLEByteArray n.toFloat32.toBFloat16Bits
@@ -511,6 +535,7 @@ private def byteArrayOfIntOverflow (dtype : Dtype) (n : Int) : ByteArray := matc
 | .uint32 | .int32 => toLEByteArray n.toInt32
 | .uint64 | .int64 => toLEByteArray n.toInt64
 | .float8_e4m3 => encodeFloat8E4M3 n.toFloat32
+| .float8_e3m4 => encodeFloat8E3M4 n.toFloat32
 | .float8_e5m2 => encodeFloat8E5M2 n.toFloat32
 | .float16 => toLEByteArray n.toFloat32.toFloat16Bits
 | .bfloat16 => toLEByteArray n.toFloat32.toBFloat16Bits
@@ -639,8 +664,6 @@ private def byteArrayToBFloat16RoundTrip (dtype : Dtype) (f : Float32) : Bool :=
 #guard bfloat16.byteArrayToBFloat16RoundTrip (-0)
 #guard bfloat16.byteArrayToBFloat16RoundTrip 256
 
-
-
 -- Add produces the IEEE754 result because fp32 (p=24) satisfies the innocuous double rounding condition (theoreom 20)
 -- https://hal.science/hal-01091186v1/document
 /-
@@ -663,6 +686,10 @@ def add (dtype : Dtype) (x y : ByteArray) : Err ByteArray :=
     let x <- decodeFloat8E4M3 x
     let y <- decodeFloat8E4M3 y
     return encodeFloat8E4M3 (x + y)
+  | .float8_e3m4 => do
+    let x <- decodeFloat8E3M4 x
+    let y <- decodeFloat8E3M4 y
+    return encodeFloat8E3M4 (x + y)
   | .float8_e5m2 => do
     let x <- decodeFloat8E5M2 x
     let y <- decodeFloat8E5M2 y
@@ -694,6 +721,10 @@ def sub (dtype : Dtype) (x y : ByteArray) : Err ByteArray :=
     let x <- decodeFloat8E4M3 x
     let y <- decodeFloat8E4M3 y
     return encodeFloat8E4M3 (x - y)
+  | .float8_e3m4 => do
+    let x <- decodeFloat8E3M4 x
+    let y <- decodeFloat8E3M4 y
+    return encodeFloat8E3M4 (x - y)
   | .float8_e5m2 => do
     let x <- decodeFloat8E5M2 x
     let y <- decodeFloat8E5M2 y
@@ -726,6 +757,10 @@ def mul (dtype : Dtype) (x y : ByteArray) : Err ByteArray :=
     let x <- decodeFloat8E4M3 x
     let y <- decodeFloat8E4M3 y
     return encodeFloat8E4M3 (x * y)
+  | .float8_e3m4 => do
+    let x <- decodeFloat8E3M4 x
+    let y <- decodeFloat8E3M4 y
+    return encodeFloat8E3M4 (x * y)
   | .float8_e5m2 => do
     let x <- decodeFloat8E5M2 x
     let y <- decodeFloat8E5M2 y
@@ -758,6 +793,10 @@ def div (dtype : Dtype) (x y : ByteArray) : Err ByteArray :=
     let x <- decodeFloat8E4M3 x
     let y <- decodeFloat8E4M3 y
     return encodeFloat8E4M3 (x / y)
+  | .float8_e3m4 => do
+    let x <- decodeFloat8E3M4 x
+    let y <- decodeFloat8E3M4 y
+    return encodeFloat8E3M4 (x / y)
   | .float8_e5m2 => do
     let x <- decodeFloat8E5M2 x
     let y <- decodeFloat8E5M2 y
@@ -791,6 +830,9 @@ def abs (dtype : Dtype) (x : ByteArray) : Err ByteArray := do
   | .float8_e4m3 => do
     let f <- decodeFloat8E4M3 x
     return encodeFloat8E4M3 f.abs
+  | .float8_e3m4 => do
+    let f <- decodeFloat8E3M4 x
+    return encodeFloat8E3M4 f.abs
   | .float8_e5m2 => do
     let f <- decodeFloat8E5M2 x
     return encodeFloat8E5M2 f.abs
@@ -826,6 +868,9 @@ def isZero (dtype : Dtype) (x : ByteArray) : Err Bool := match dtype with
 -- We need to worry about -0, which is not all 0s in the bit pattern.
 | float8_e4m3 => do
   let f <- decodeFloat8E4M3 x
+  return f == 0
+| float8_e3m4 => do
+  let f <- decodeFloat8E3M4 x
   return f == 0
 | float8_e5m2 => do
   let f <- decodeFloat8E5M2 x
@@ -991,8 +1036,65 @@ def castOverflow (fromDtype : Dtype) (data : ByteArray) (toDtype : Dtype) : Err 
       let f <- decodeFloat8E4M3 data
       return encodeFloat8E5M2 f
 
+  -- float8_e3m4 to unsigned integers
+    | .float8_e3m4, .uint8
+    | .float8_e3m4, .uint16
+    | .float8_e3m4, .uint32
+    | .float8_e3m4, .uint64 => do
+      let f <- decodeFloat8E3M4 data
+      return toDtype.byteArrayOfNatOverflow (saturatingNatOfFloat32 toDtype f)
+    -- float8_e3m4 to signed integers
+    | .float8_e3m4, .int8
+    | .float8_e3m4, .int16
+    | .float8_e3m4, .int32
+    | .float8_e3m4, .int64 => do
+      let f <- decodeFloat8E3M4 data
+      return toDtype.byteArrayOfIntOverflow (saturatingIntOfFloat32 toDtype f)
+    -- float8_e3m4 to float32
+    | .float8_e3m4, .float32 => do
+      let f <- decodeFloat8E3M4 data
+      return toLEByteArray f
+    -- float8_e3m4 to float64
+    | .float8_e3m4, .float64 => do
+      let f <- decodeFloat8E3M4 data
+      return toLEByteArray f.toFloat
+    -- float8_e3m4 to fp16/bf16
+    | .float8_e3m4, .float16
+    | .float8_e3m4, .bfloat16 => do
+      let f <- decodeFloat8E3M4 data
+      encodeFloat16OrBFloat16 toDtype f
+    -- float8_e3m4 to float8_e4m3
+    | .float8_e3m4, .float8_e4m3 => do
+      let f <- decodeFloat8E3M4 data
+      return encodeFloat8E4M3 f
+    -- float8_e3m4 to float8_e5m2
+    | .float8_e3m4, .float8_e5m2 => do
+      let f <- decodeFloat8E3M4 data
+      return encodeFloat8E5M2 f
+    -- float32 -> float8_e3m4
+    | .float32, .float8_e3m4 => do
+      let f <- Float32.ofLEByteArray data
+      return encodeFloat8E3M4 f
+    -- float64 -> float8_e3m4
+    | .float64, .float8_e3m4 => do
+      let f <- Float.ofLEByteArray data
+      return encodeFloat8E3M4 f.toFloat32
+    -- fp16/bf16 -> float8_e3m4
+    | .float16, .float8_e3m4
+    | .bfloat16, .float8_e3m4 => do
+      let f <- decodeFloat16OrBFloat16 fromDtype data
+      return encodeFloat8E3M4 f
+    -- float8_e4m3 -> float8_e3m4
+    | .float8_e4m3, .float8_e3m4 => do
+      let f <- decodeFloat8E4M3 data
+      return encodeFloat8E3M4 f
+    -- float8_e5m2 -> float8_e3m4
+    | .float8_e5m2, .float8_e3m4 => do
+      let f <- decodeFloat8E5M2 data
+      return encodeFloat8E3M4 f
 
-    | .float8_e5m2, .float8_e5m2 | .float8_e4m3, .float8_e4m3 | .float16, .float16 | .bfloat16, .bfloat16 | .float32, .float32 | .float64, .float64 => impossible
+    | .float8_e3m4, .float8_e3m4 | .float8_e5m2, .float8_e5m2 | .float8_e4m3, .float8_e4m3
+    | .float16, .float16 | .bfloat16, .bfloat16 | .float32, .float32 | .float64, .float64 => impossible
 
 
 def isZero! (dtype : Dtype) (x : ByteArray) : Bool := get! $ dtype.isZero x
@@ -1069,6 +1171,10 @@ private def liftFloatUnop (f32 : Float32 -> Err Float32) (f64 : Float -> Err Flo
     let f <- decodeFloat8E4M3 data
     let x <- f32 f
     return encodeFloat8E4M3 x
+  | .float8_e3m4 => do
+    let f <- decodeFloat8E3M4 data
+    let x <- f32 f
+    return encodeFloat8E3M4 x
   | .float16 | .bfloat16 => do
     let f <- decodeFloat16OrBFloat16 dtype data
     let x <- f32 f
@@ -1124,7 +1230,7 @@ def tanh : Dtype -> ByteArray -> Err ByteArray :=
 def tanh! (dtype : Dtype) (data : ByteArray) : ByteArray := get! $ tanh dtype data
 
 private def shift (f : UInt64 -> UInt64 -> UInt64) (dtype : Dtype) (bits : ByteArray) (shiftAmount : ByteArray) : Err ByteArray := match dtype with
-| .float32 | .float64 | .bfloat16 | .float16 | .float8_e4m3 | .float8_e5m2 => throw "shifts not supported at float type"
+| .float32 | .float64 | .bfloat16 | .float16 | .float8_e4m3 | .float8_e3m4 | .float8_e5m2 => throw "shifts not supported at float type"
 | .bool => throw "In NumPy, bool shifts are cast to int64. This seems arbitrary so please cast (e.g. with astype) before you shift."
 | .uint64 | .int64 | .uint32 | .int32 | .uint16 | .int16 | .uint8 | .int8 =>
   let k := dtype.itemsize

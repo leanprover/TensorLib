@@ -35,6 +35,7 @@ private def float64MantissaBits : Nat := 52
 private def float16MantissaBits : Nat := 10
 private def bfloat16MantissaBits : Nat := 7
 private def float8e4m3MantissaBits : Nat := 3
+private def float8e3m4MantissaBits : Nat := 4
 private def float8e5m2MantissaBits : Nat := 2
 
 -- Add 1 to the mantissa length because of the implicit leading 1
@@ -44,6 +45,7 @@ def maxSafeNatForFloat16 : Nat := Nat.pow 2 (float16MantissaBits + 1)
 def maxSafeNatForBFloat16 : Nat := Nat.pow 2 (bfloat16MantissaBits + 1)
 def maxSafeNatForFloat8e4m3 : Nat := Nat.pow 2 (float8e4m3MantissaBits + 1)
 def maxSafeNatForFloat8e5m2 : Nat := Nat.pow 2 (float8e5m2MantissaBits + 1)
+def maxSafeNatForFloat8e3m4 : Nat := 15
 
 def _root_.Float32.minValue : Float32 := Float32.ofBits 0xFF7FFFFF
 def _root_.Float32.maxValue : Float32 := Float32.ofBits 0x7F7FFFFF
@@ -518,6 +520,129 @@ def _root_.Float32.toFloat8E5M2Bits (f : Float32) : UInt8 :=
 #guard (Float32.ofBits 0x47600000).toFloat8E5M2Bits == (123 : UInt8)    -- 57344 (max)
 #guard (Float32.ofBits 0x7F800000).toFloat8E5M2Bits == (124 : UInt8)    -- +inf
 #guard (Float32.ofBits 0xFF800000).toFloat8E5M2Bits == (252 : UInt8)    -- -inf
+
+-- Convert float8_e3m4 bits (stored as UInt8) to Float32.
+-- E3M4: 1 sign + 3 exponent + 4 mantissa, bias = 3, IEEE-like (has inf and NaN).
+-- Max value: +-15.5, smallest subnormal: 2^(-6), smallest normal: 2^(-2).
+def _root_.UInt8.toFloat32FromFloat8E3M4 (bits : UInt8) : Float32 :=
+  let sign := (bits >>> 7) &&& 1        -- bit 7: sign
+  let exp := (bits >>> 4) &&& 0x7       -- bits 6..4: exponent (3 bits)
+  let mant := bits &&& 0xF              -- bits 3..0: mantissa (4 bits)
+  let sign32 := sign.toUInt32 <<< 31
+  if exp == 0 then
+    if mant == 0 then
+      -- ±zero
+      Float32.ofBits sign32
+    else
+      -- Subnormal: value = (-1)^sign × mant × 2^(1 - 3 - 4) = mant × 2^(-6)
+      let f := Float32.ofNat mant.toNat
+      let scale := Float32.ofBits 0x3C800000  -- 2^(-6) in fp32
+      let result := f * scale
+      if sign == 1 then Float32.ofBits (result.toBits ||| 0x80000000)
+      else result
+  else if exp == 0x7 then
+    if mant == 0 then
+      -- ±infinity
+      Float32.ofBits (sign32 ||| 0x7F800000)
+    else
+      -- NaN
+      Float32.ofBits (sign32 ||| 0x7FC00000)
+  else
+    -- Normal: rebias exponent from e3m4 (bias=3) to fp32 (bias=127)
+    -- Shift mantissa from 4 bits to 23 bits (left-pad with 19 zeros)
+    let newExp := exp.toUInt32 - 3 + 127
+    Float32.ofBits (sign32 ||| newExp <<< 23 ||| mant.toUInt32 <<< 19)
+
+-- Convert Float32 to float8_e3m4 bits (UInt8).
+-- E3M4: 1 sign + 3 exponent + 4 mantissa, bias = 3.
+-- Overflow maps to +-inf (IEEE-like). Round-to-nearest-even.
+def _root_.Float32.toFloat8E3M4Bits (f : Float32) : UInt8 :=
+  let bits := f.toBits
+  let sign := (bits >>> 31) &&& 1
+  let exp := (bits >>> 23) &&& 0xFF
+  let mant := bits &&& 0x7FFFFF
+  let sign8 := sign.toUInt8 <<< 7
+  if exp == 0xFF then
+    if mant == 0 then
+      -- +-inf -> +-inf in e3m4
+      sign8 ||| 0x70
+    else
+      -- NaN → quiet NaN in e3m4 (exp=7, mant=1)
+      sign8 ||| 0x71
+  else if exp == 0 then
+    -- fp32 zero or subnormal -> too small for e3m4, flush to zero
+    sign8
+  else
+    -- Normal fp32. Rebias exponent from fp32 (127) to e3m4 (3).
+    let realExp : Int := exp.toNat - 127
+    let fullMant := mant ||| 0x800000
+    if realExp > 3 then
+      -- Overflow → ±inf
+      sign8 ||| 0x70
+    else if realExp >= -2 then
+      -- Normal e3m4 range: realExp in [-2, 3], exp field 1..6
+      let e3m4Exp := (realExp + 3).toNat
+      -- Truncate fp32 mantissa (23 bits) to 4 bits: shift right by 19
+      let truncated := mant >>> 19
+      let roundBit := (mant >>> 18) &&& 1
+      let stickyBits := mant &&& 0x3FFFF
+      let rounded := if roundBit == 1 && (stickyBits != 0 || truncated &&& 1 == 1)
+        then truncated + 1 else truncated
+      -- If rounding overflows mantissa (0x10), bump exponent
+      let (finalExp, finalMant) := if rounded > 0xF then
+        (e3m4Exp + 1, (0 : UInt32))
+      else (e3m4Exp, rounded)
+      -- If exponent overflows to 7 with mant=0, that's inf
+      if finalExp >= 7 then
+        sign8 ||| 0x70
+      else
+        sign8 ||| (finalExp.toUInt8 <<< 4) ||| finalMant.toUInt8
+    else
+      -- Subnormal in e3m4: realExp < -2
+      -- Subnormal value = mant × 2^(-6), need:
+      -- mant = fullMant * 2^(realExp) / 2^(-6) / 2^23 = fullMant >> (17 - realExp)
+      let totalShift := (17 - realExp).toNat
+      if totalShift >= 25 then
+        sign8
+      else
+        let shifted := fullMant >>> totalShift.toUInt32
+        let roundBit := if totalShift > 0 then (fullMant >>> (totalShift.toUInt32 - 1)) &&& 1 else 0
+        let stickyMask := if totalShift > 1 then (1 <<< (totalShift.toUInt32 - 1)) - 1 else 0
+        let stickyBits := fullMant &&& stickyMask
+        let rounded := if roundBit == 1 && (stickyBits != 0 || shifted &&& 1 == 1)
+          then shifted + 1 else shifted
+        -- If rounded up to 16, becomes smallest normal (exp=1, mant=0)
+        if rounded >= 16 then
+          sign8 ||| (1 : UInt8) <<< 4
+        else
+          sign8 ||| rounded.toUInt8
+
+-- e3m4 decode tests (verified against ml_dtypes)
+#guard (0 : UInt8).toFloat32FromFloat8E3M4 == Float32.ofBits 0x00000000       -- +0
+#guard (128 : UInt8).toFloat32FromFloat8E3M4 == Float32.ofBits 0x80000000     -- -0
+#guard (48 : UInt8).toFloat32FromFloat8E3M4 == 1.0                            -- 1.0
+#guard (176 : UInt8).toFloat32FromFloat8E3M4 == -1.0                          -- -1.0
+#guard (64 : UInt8).toFloat32FromFloat8E3M4 == 2.0                            -- 2.0
+#guard (111 : UInt8).toFloat32FromFloat8E3M4 == Float32.ofBits 0x41780000     -- max (15.5)
+#guard (239 : UInt8).toFloat32FromFloat8E3M4 == Float32.ofBits 0xC1780000     -- -max (-15.5)
+#guard (112 : UInt8).toFloat32FromFloat8E3M4 == Float32.ofBits 0x7F800000     -- +inf
+#guard (240 : UInt8).toFloat32FromFloat8E3M4 == Float32.ofBits 0xFF800000     -- -inf
+#guard (1 : UInt8).toFloat32FromFloat8E3M4 == Float32.ofBits 0x3C800000       -- smallest subnormal
+#guard (16 : UInt8).toFloat32FromFloat8E3M4 == Float32.ofBits 0x3E800000      -- smallest normal
+#guard (56 : UInt8).toFloat32FromFloat8E3M4 == 1.5                            -- 1.5
+-- NaN: f != f
+#guard (113 : UInt8).toFloat32FromFloat8E3M4 != (113 : UInt8).toFloat32FromFloat8E3M4  -- NaN
+#guard (127 : UInt8).toFloat32FromFloat8E3M4 != (127 : UInt8).toFloat32FromFloat8E3M4  -- NaN
+
+-- e3m4 encode tests (verified against ml_dtypes)
+#guard (Float32.ofBits 0x00000000).toFloat8E3M4Bits == (0 : UInt8)      -- +0
+#guard (Float32.ofBits 0x80000000).toFloat8E3M4Bits == (128 : UInt8)    -- -0
+#guard (Float32.ofNat 1).toFloat8E3M4Bits == (48 : UInt8)               -- 1.0
+#guard (Float32.ofNat 2).toFloat8E3M4Bits == (64 : UInt8)               -- 2.0
+#guard (Float32.ofNat 3).toFloat8E3M4Bits == (72 : UInt8)               -- 3.0
+#guard (Float32.ofBits 0x41780000).toFloat8E3M4Bits == (111 : UInt8)    -- 15.5 (max)
+#guard (Float32.ofBits 0x7F800000).toFloat8E3M4Bits == (112 : UInt8)    -- +inf
+#guard (Float32.ofBits 0xFF800000).toFloat8E3M4Bits == (240 : UInt8)    -- -inf
 
 section Test
 
