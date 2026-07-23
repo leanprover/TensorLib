@@ -430,13 +430,13 @@ private def uintOverflowThreshold : Float := 9223372036854775808.0  -- 2^63, bou
 -- Wraps a float to an unsigned N-bit value, with large-magnitude guard.
 -- For |f| >= 2^63: returns uintMax for positive, 0 for negative (avoids toUInt64 UB).
 -- For |f| < 2^63: wraps via Euclidean mod 2^N.
-private def wrapUintMod (bits : Nat) (f : Float32) : Nat :=
+private def wrapUintModFloat32 (bits : Nat) (f : Float32) : Nat :=
   let uintMax := (1 <<< bits) - 1
   if f.toFloat >= uintOverflowThreshold then uintMax
   else if f.toFloat <= -uintOverflowThreshold then 0
   else (f.toInt % (uintMax + 1)).toNat
 
-private def wrapUintModF64 (bits : Nat) (f : Float) : Nat :=
+private def wrapUintModFloat64 (bits : Nat) (f : Float) : Nat :=
   let uintMax := (1 <<< bits) - 1
   if f >= uintOverflowThreshold then uintMax
   else if f <= -uintOverflowThreshold then 0
@@ -462,8 +462,8 @@ private def saturatingNatOfFloat32 (dtype : Dtype) (f : Float32) : Nat :=
       -- values >= 2^63 would overflow to UInt64 (undefined behavior)
       else if f.toFloat >= uintOverflowThreshold then dtype.intMax.toNat
       else min f.toNat dtype.intMax.toNat
-    | .uint8 => wrapUintMod 8 f
-    | .uint16 => wrapUintMod 16 f
+    | .uint8 => wrapUintModFloat32 8 f
+    | .uint16 => wrapUintModFloat32 16 f
     | _ => f.toNat
 
 -- Same behavior as saturatingNatOfFloat32
@@ -477,8 +477,8 @@ private def saturatingNatOfFloat64 (dtype : Dtype) (f : Float) : Nat :=
       if f <= 0 then 0
       else if f >= uintOverflowThreshold then dtype.intMax.toNat
       else min f.toNat dtype.intMax.toNat
-    | .uint8 => wrapUintModF64 8 f
-    | .uint16 => wrapUintModF64 16 f
+    | .uint8 => wrapUintModFloat64 8 f
+    | .uint16 => wrapUintModFloat64 16 f
     | _ => f.toNat
 -- Saturating fp32 to Int, depends on target integer dtype.
 -- +inf -> intMax, -inf -> intMin, NaN -> 0
