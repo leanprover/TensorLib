@@ -63,6 +63,7 @@ def gen : Gen Dtype := Gen.elements [
   uint32,
   uint64,
   float8_e4m3,
+  float8_e3m4,
   float8_e5m2,
   float16,
   bfloat16,
@@ -168,6 +169,7 @@ private def joinOrdered (x y : Dtype) : Option Dtype :=
   | .float8_e4m3, .bool
   | .float8_e4m3, .int8
   | .float8_e4m3, .uint8 => float8_e4m3
+  | .float8_e4m3, .float8_e3m4 => float8_e3m4
   | .float8_e4m3, _ => none
   | .float8_e5m2, .float32 => float32
   | .float8_e5m2, .float64 => float64
@@ -292,19 +294,19 @@ def lossless (fromDtype toDtype : Dtype) : Bool := match fromDtype, toDtype with
 | .bfloat16, .float64 => true
 | .bfloat16, _ => false
 | .float8_e4m3, .float8_e4m3
-| .float8_e4m3, .float16
-| .float8_e4m3, .bfloat16
+-- | .float8_e4m3, .float16
+-- | .float8_e4m3, .bfloat16
 | .float8_e4m3, .float32
 | .float8_e4m3, .float64 => true
 | .float8_e4m3, _ => false
 | .float8_e5m2, .float8_e5m2
-| .float8_e5m2, .float16
-| .float8_e5m2, .bfloat16
+--| .float8_e5m2, .float16
+-- | .float8_e5m2, .bfloat16
 | .float8_e5m2, .float32
 | .float8_e5m2, .float64 => true
 | .float8_e5m2, _ => false
 | .float8_e3m4, .float8_e3m4
-| .float8_e3m4, .float8_e4m3
+-- Note: np.can_cast(e3m4, e4m3) returns true but this is incorrect since precision is lost
 | .float8_e3m4, .float32
 | .float8_e3m4, .float64 => true
 | .float8_e3m4, _ => false

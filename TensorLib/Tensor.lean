@@ -599,6 +599,7 @@ def toFloat32Tree (arr : Tensor) : Err (Format.Tree Float32) := do
   match arr.dtype with
   | .float8_e5m2 => t.mapM (fun b => Dtype.decodeFloat8E5M2 b)
   | .float8_e4m3 => t.mapM (fun b => Dtype.decodeFloat8E4M3 b)
+  | .float8_e3m4 => t.mapM (fun b => Dtype.decodeFloat8E3M4 b)
   | .float16 => t.mapM (fun b => Dtype.byteArrayToFloat16 .float16 b)
   | .bfloat16 => t.mapM (fun b => Dtype.byteArrayToBFloat16 .bfloat16 b)
   | _ => t.mapM ( fun b => Float32.ofLEByteArray b)
@@ -610,6 +611,7 @@ def toFloat64Tree (arr : Tensor) : Err (Format.Tree Float) := do
   match arr.dtype with
   | .float8_e5m2 => t.mapM (fun b => do let f <- Dtype.decodeFloat8E5M2 b; return f.toFloat)
   | .float8_e4m3 => t.mapM (fun b => do let f <- Dtype.decodeFloat8E4M3 b; return f.toFloat)
+  | .float8_e3m4 => t.mapM (fun b => do let f <- Dtype.decodeFloat8E3M4 b; return f.toFloat)
   | .float16 => t.mapM (fun b => do let f <- Dtype.byteArrayToFloat16 .float16 b; return f.toFloat)
   | .bfloat16 => t.mapM (fun b => do let f <- Dtype.byteArrayToBFloat16 .bfloat16 b; return f.toFloat)
   | .float32 => t.mapM (fun b => do let f <- Float32.ofLEByteArray b; return f.toFloat)
