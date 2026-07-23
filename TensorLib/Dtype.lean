@@ -428,6 +428,7 @@ private def byteArrayToNatRoundTrip (dtype : Dtype) (n : Nat) : Bool :=
 private def uintOverflowThreshold : Float := 9223372036854775808.0  -- 2^63, boundary of toUInt64 UB
 
 -- Wraps a float to an unsigned N-bit value, with large-magnitude guard.
+-- Only for uint8/uint16. uint32/uint64 use saturation instead.
 -- For |f| >= 2^63: returns uintMax for positive, 0 for negative (avoids toUInt64 UB).
 -- For |f| < 2^63: wraps via Euclidean mod 2^N.
 private def wrapUintModFloat32 (bits : Nat) (f : Float32) : Nat :=
