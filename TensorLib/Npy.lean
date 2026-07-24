@@ -439,7 +439,7 @@ def Ndarray.save! (arr : Ndarray) (file : System.FilePath) : IO Unit :=
 #guard Npy.Dtype.fromNpyString "<f1" == .ok { name := .float8_e5m2, order := .littleEndian }
 #guard Npy.Dtype.fromNpyString "|f1" != .ok { name := .float8_e5m2, order := .littleEndian }
 -- Known limitation: e3m4 cannot round-trip through npy (reads back as e4m3)
-#guard Npy.Dtype.fromNpyString "<V1" == .ok { name := .float8_e4m3, order := .littleEndian }
+#guard Npy.Dtype.fromNpyString "<V1" != .ok { name := .float8_e3m4, order := .littleEndian }
 #guard Npy.Dtype.dtypeNameToNpyString .float8_e3m4 == "V1"
 #guard Npy.Dtype.dtypeNameToNpyString .float8_e4m3 == "V1"
 

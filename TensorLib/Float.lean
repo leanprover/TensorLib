@@ -45,6 +45,9 @@ def maxSafeNatForFloat16 : Nat := Nat.pow 2 (float16MantissaBits + 1)
 def maxSafeNatForBFloat16 : Nat := Nat.pow 2 (bfloat16MantissaBits + 1)
 def maxSafeNatForFloat8e4m3 : Nat := Nat.pow 2 (float8e4m3MantissaBits + 1)
 def maxSafeNatForFloat8e5m2 : Nat := Nat.pow 2 (float8e5m2MantissaBits + 1)
+-- The formula doesn't apply here because e3m4's exponent range
+-- is too small (max value is 15.5). The format overflows to inf before losing
+-- integer precision
 def maxSafeNatForFloat8e3m4 : Nat := 15
 
 def _root_.Float32.minValue : Float32 := Float32.ofBits 0xFF7FFFFF
