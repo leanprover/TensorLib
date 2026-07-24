@@ -589,13 +589,132 @@ private def testFloat8E5M2EdgeCases : IO Bool := do
 
   return checks.all id
 
+-- float8_e3m4 edge cases: decode from npy, arithmetic, and casting
+-- E3M4: 1 sign + 3 exponent + 4 mantissa, bias=3, IEEE-like (has inf and NaN)
+-- verified against ml_dtypes outputs
+private def testFloat8E3M4EdgeCases : IO Bool := do
+  let file <- saveNumpyArray "np.array([15.5, 0.1, -0.0, 0.015625, 1.5, 0.5, 8.0, 2.0]).astype(__import__('ml_dtypes').float8_e3m4)"
+  let npy <- Npy.parseFile file
+  let arr <- IO.ofExcept (Tensor.ofNpy npy)
+  let _ <- IO.FS.removeFile file
+  -- Decode 1-byte e3m4 element at offset using extract
+  let decode (offset : Nat) : Err Float32 :=
+    Dtype.decodeFloat8E3M4 (arr.data.extract offset (offset + 1))
+  let mut checks : List Bool := []
+
+  -- max representable value (15.5)
+  let v0 <- IO.ofExcept (decode 0)
+  let pass := v0 == Float32.ofBits 0x41780000
+  IO.println s!"fp8_e3m4 v0 (15.5): {pass}"
+  checks := pass :: checks
+
+  -- 0.1 rounded in e3m4
+  let v1 <- IO.ofExcept (decode 1)
+  let diff := v1 - 0.09375
+  let pass := diff < 0.01 && diff > -0.01
+  IO.println s!"fp8_e3m4 v1 (0.1 ~ 0.09375): {pass}"
+  checks := pass :: checks
+
+  -- -0
+  let v2 <- IO.ofExcept (decode 2)
+  let pass := v2 == 0.0
+  IO.println s!"fp8_e3m4 v2 (-0): {pass}"
+  checks := pass :: checks
+
+  -- smallest subnormal: 2^(-6)
+  let v3 <- IO.ofExcept (decode 3)
+  let pass := v3 == Float32.ofBits 0x3C800000
+  IO.println s!"fp8_e3m4 v3 (smallest subnormal): {pass}"
+  checks := pass :: checks
+
+  -- 1.5
+  let v4 <- IO.ofExcept (decode 4)
+  let pass := v4 == 1.5
+  IO.println s!"fp8_e3m4 v4 (1.5): {pass}"
+  checks := pass :: checks
+
+  -- 0.5
+  let v5 <- IO.ofExcept (decode 5)
+  let pass := v5 == 0.5
+  IO.println s!"fp8_e3m4 v5 (0.5): {pass}"
+  checks := pass :: checks
+
+  -- 8 = maxSafeNat for e3m4 (well, within range)
+  let v6 <- IO.ofExcept (decode 6)
+  let pass := v6 == Float32.ofNat 8
+  IO.println s!"fp8_e3m4 v6 (8): {pass}"
+  checks := pass :: checks
+
+  -- 2.0
+  let v7 <- IO.ofExcept (decode 7)
+  let pass := v7 == 2.0
+  IO.println s!"fp8_e3m4 v7 (2.0): {pass}"
+  checks := pass :: checks
+
+  -- Arithmetic: 1.5 and 2.0
+  let a := toLEByteArray (56 : UInt8)   -- e3m4 encoding of 1.5
+  let b := toLEByteArray (64 : UInt8)   -- e3m4 encoding of 2.0
+  let negA := toLEByteArray (184 : UInt8)  -- e3m4 encoding of -1.5
+
+  let pass <- checkBitsU8 "fp8_e3m4 add (1.5 + 2.0 = 3.5)" 76 (Dtype.add .float8_e3m4 a b)
+  checks := pass :: checks
+
+  let pass <- checkBitsU8 "fp8_e3m4 sub (1.5 - 2.0 = -0.5)" 160 (Dtype.sub .float8_e3m4 a b)
+  checks := pass :: checks
+
+  let pass <- checkBitsU8 "fp8_e3m4 mul (1.5 * 2.0 = 3.0)" 72 (Dtype.mul .float8_e3m4 a b)
+  checks := pass :: checks
+
+  let pass <- checkBitsU8 "fp8_e3m4 div (1.5 / 2.0 = 0.75)" 40 (Dtype.div .float8_e3m4 a b)
+  checks := pass :: checks
+
+  let pass <- checkBitsU8 "fp8_e3m4 abs (-1.5) = 1.5" 56 (Dtype.abs .float8_e3m4 negA)
+  checks := pass :: checks
+
+  -- Casting: e3m4(1.5) -> int8 = 1
+  let castToI8 <- IO.ofExcept (Dtype.castOverflow .float8_e3m4 a .int8)
+  let pass := castToI8.toNat == 1
+  IO.println s!"fp8_e3m4 cast to int8 (1.5 -> 1): {pass}"
+  checks := pass :: checks
+
+  -- e3m4(-0) -> bool = false
+  let negZero := toLEByteArray (128 : UInt8)
+  let castToBool <- IO.ofExcept (Dtype.castOverflow .float8_e3m4 negZero .bool)
+  let pass := castToBool == ByteArray.mk #[0]
+  IO.println s!"fp8_e3m4 -0 to bool (false): {pass}"
+  checks := pass :: checks
+
+  -- fp32(2.0) -> e3m4 = bits 64
+  let f32_2 := toLEByteArray (Float32.ofNat 2)
+  let castToE3m4 <- IO.ofExcept (Dtype.castOverflow .float32 f32_2 .float8_e3m4)
+  let pass := castToE3m4 == toLEByteArray (64 : UInt8)
+  IO.println s!"fp8_e3m4 fp32 to e3m4 (2.0): {pass}"
+  checks := pass :: checks
+
+  -- Overflow to inf: 16 -> inf (bits 112)
+  let f32_16 := toLEByteArray (Float32.ofNat 16)
+  let castOverflow <- IO.ofExcept (Dtype.castOverflow .float32 f32_16 .float8_e3m4)
+  let pass := castOverflow == toLEByteArray (112 : UInt8)
+  IO.println s!"fp8_e3m4 overflow (16 -> inf): {pass}"
+  checks := pass :: checks
+
+  -- +inf preserved
+  let f32_inf := toLEByteArray (Float32.ofBits 0x7F800000)
+  let castInf <- IO.ofExcept (Dtype.castOverflow .float32 f32_inf .float8_e3m4)
+  let pass := castInf == toLEByteArray (112 : UInt8)
+  IO.println s!"fp8_e3m4 +inf -> +inf: {pass}"
+  checks := pass :: checks
+
+  return checks.all id
+
 def runAllTests : IO Bool := do
  return (<- testTensorElementBV Dtype.uint16) &&
         (<- testTensorElementBV Dtype.uint32) &&
         (<- testFloat16EdgeCases) &&
         (<- testBFloat16EdgeCases) &&
         (<- testFloat8E4M3EdgeCases) &&
-        (<- testFloat8E5M2EdgeCases)
+        (<- testFloat8E5M2EdgeCases) &&
+        (<- testFloat8E3M4EdgeCases)
 
 end Test
 end TensorLib

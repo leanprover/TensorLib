@@ -111,7 +111,10 @@ def dtypeNameToNpyString (t : TensorLib.Dtype) : String := match t with
 | .uint16 => "u2"
 | .uint32 => "u4"
 | .uint64 => "u8"
-| .float8_e4m3 => "V1"
+-- float8_e3m4 serializes as "V1" in ml_dtypes, same as e4m3.
+-- The npy format cannot distinguish between fp8 subtypes that use V1.
+-- Reading "<V1" defaults to e4m3
+| .float8_e4m3 | .float8_e3m4 => "V1"
 | .float8_e5m2 => "f1"
 | .float16 => "f2"
 | .bfloat16 => "V2"
@@ -435,6 +438,10 @@ def Ndarray.save! (arr : Ndarray) (file : System.FilePath) : IO Unit :=
 #guard Npy.Dtype.fromNpyString "|V1" != .ok { name := .float8_e4m3, order := .littleEndian }
 #guard Npy.Dtype.fromNpyString "<f1" == .ok { name := .float8_e5m2, order := .littleEndian }
 #guard Npy.Dtype.fromNpyString "|f1" != .ok { name := .float8_e5m2, order := .littleEndian }
+-- Known limitation: e3m4 cannot round-trip through npy (reads back as e4m3)
+#guard Npy.Dtype.fromNpyString "<V1" != .ok { name := .float8_e3m4, order := .littleEndian }
+#guard Npy.Dtype.dtypeNameToNpyString .float8_e3m4 == "V1"
+#guard Npy.Dtype.dtypeNameToNpyString .float8_e4m3 == "V1"
 
 end Npy
 end TensorLib
