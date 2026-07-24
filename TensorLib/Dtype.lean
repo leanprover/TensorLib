@@ -169,7 +169,7 @@ private def joinOrdered (x y : Dtype) : Option Dtype :=
   | .float8_e4m3, .bool
   | .float8_e4m3, .int8
   | .float8_e4m3, .uint8 => float8_e4m3
-  -- e4m3 has more range, e3m4 has more mantissa but niether dominate so no safe common type exists. This diverges from numpy
+  -- e4m3 has more range, e3m4 has more mantissa but neither dominates so no safe common type exists. This diverges from numpy
   | .float8_e4m3, .float8_e3m4 => none
   | .float8_e4m3, _ => none
   | .float8_e5m2, .float32 => float32
@@ -307,10 +307,10 @@ def lossless (fromDtype toDtype : Dtype) : Bool := match fromDtype, toDtype with
 | .float8_e5m2, .float32
 | .float8_e5m2, .float64 => true
 | .float8_e5m2, _ => false
+-- Note: np.can_cast(e3m4, e4m3) returns true but this is incorrect since precision is lost
 | .float8_e3m4, .float8_e3m4
 | .float8_e3m4, .float16
 | .float8_e3m4, .bfloat16
--- Note: np.can_cast(e3m4, e4m3) returns true but this is incorrect since precision is lost
 | .float8_e3m4, .float32
 | .float8_e3m4, .float64 => true
 | .float8_e3m4, _ => false
@@ -1081,7 +1081,7 @@ def castOverflow (fromDtype : Dtype) (data : ByteArray) (toDtype : Dtype) : Err 
     | .float32, .float8_e3m4 => do
       let f <- Float32.ofLEByteArray data
       return encodeFloat8E3M4 f
-    -- float64 -> float8_e3m4
+    -- float64 -> float8_e3m4: rounds twice via fp32. Can disagree with ml_dtypes at the overflow edge.
     | .float64, .float8_e3m4 => do
       let f <- Float.ofLEByteArray data
       return encodeFloat8E3M4 f.toFloat32

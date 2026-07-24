@@ -670,14 +670,25 @@ def ofNpy (arr : Npy.Ndarray) : Err Tensor := do
 If we have a non-trivial view, we will need a copy, since strides
 and start positions are not included in the .npy file format
 -/
-def toNpy (arr : Tensor) : Npy.Ndarray :=
-  let arr := if arr.isTriviallyReshapable then arr else arr.copy
-  let descr := Npy.Dtype.mk arr.dtype Npy.ByteOrder.littleEndian
-  let shape := arr.shape
-  let header : Npy.Header := { descr := descr, shape := shape }
-  let data := arr.data
-  let startIndex := 0
-  { header, data, startIndex }
+-- def toNpy (arr : Tensor) : Npy.Ndarray :=
+--   let arr := if arr.isTriviallyReshapable then arr else arr.copy
+--   let descr := Npy.Dtype.mk arr.dtype Npy.ByteOrder.littleEndian
+--   let shape := arr.shape
+--   let header : Npy.Header := { descr := descr, shape := shape }
+--   let data := arr.data
+--   let startIndex := 0
+--   { header, data, startIndex }
+
+def toNpy (arr : Tensor) : Err Npy.Ndarray :=
+  if arr.dtype == .float8_e3m4 then .error "float8_e3m4 cannot be saved to npy: format uses V1 which is indistinguishable from float8_e4m3"
+  else
+    let arr := if arr.isTriviallyReshapable then arr else arr.copy
+    let descr := Npy.Dtype.mk arr.dtype Npy.ByteOrder.littleEndian
+    let shape := arr.shape
+    let header : Npy.Header := { descr := descr, shape := shape }
+    let data := arr.data
+    let startIndex := 0
+    .ok { header, data, startIndex }
 
 section Test
 
