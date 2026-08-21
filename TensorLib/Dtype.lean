@@ -21,9 +21,10 @@ import TensorLib.Common
 import TensorLib.Float
 import TensorLib.Shape
 
-open Plausible(Gen SampleableExt Shrinkable)
+open Plausible(Gen SampleableExt Shrinkable Arbitrary)
 
 namespace TensorLib
+
 
 /-! The subset of types NumPy supports that we care about -/
 inductive Dtype where
@@ -77,7 +78,7 @@ def gen : Gen Dtype := Gen.elements [
 
 instance : Shrinkable Dtype where
 
-instance : SampleableExt Dtype := SampleableExt.mkSelfContained gen
+instance : Arbitrary Dtype where arbitrary := gen
 
 -- Should match the NumPy name of the dtype. We use toString to generate NumPy test code.
 instance : ToString Dtype where
@@ -390,6 +391,16 @@ def fp8Max (dtype : Dtype) : Option Float32 := match dtype with
   | .float8_e4m3 => some 448.0
   | .float8_e5m2 => some 57344.0
   | .float8_e3m4 => some 15.5
+  | _ => none
+
+-- Smallest positive representable Fp32 value for each MX compute dtype.
+-- This is the smallest subnormal: 2^(1 - bias - mantissaBits).
+-- Values below this flush to zero in the target format, breaking the
+-- relative error bound (1/2) * ε * |x|.
+def fp8Min (dtype : Dtype) : Option Float32 := match dtype with
+  | .float8_e4m3 => some (Float32.ofBits 0x3B000000) -- 2^(-9) = 0.001953125
+  | .float8_e5m2 => some (Float32.ofBits 0x37800000) -- 2^(-16) = 0.0000153
+  | .float8_e3m4 => some (Float32.ofBits 0x3C800000) -- 2^(-6) = 0.015625
   | _ => none
 
 private def maxSafeNat : Dtype -> Option Nat
@@ -1507,7 +1518,7 @@ private def canCastLosslessIntRoundTrip (fromDtype : Dtype) (n : Int) (toDtype :
 /--
 info: Unable to find a counter-example
 ---
-warning: declaration uses 'sorry'
+warning: declaration uses `sorry`
 -/
 #guard_msgs in
 example (fromDtype toDtype : Dtype) (n : Nat) :
@@ -1519,7 +1530,7 @@ example (fromDtype toDtype : Dtype) (n : Nat) :
 /--
 info: Unable to find a counter-example
 ---
-warning: declaration uses 'sorry'
+warning: declaration uses `sorry`
 -/
 #guard_msgs in
 -- One dtype should always go back and forth
@@ -1530,7 +1541,7 @@ example (dtype : Dtype) (n : Nat) :
 /--
 info: Unable to find a counter-example
 ---
-warning: declaration uses 'sorry'
+warning: declaration uses `sorry`
 -/
 #guard_msgs in
 -- Lossless translations should be OK
@@ -1546,7 +1557,7 @@ example (fromDtype toDtype : Dtype) (n : Nat) :
 /--
 info: Unable to find a counter-example
 ---
-warning: declaration uses 'sorry'
+warning: declaration uses `sorry`
 -/
 #guard_msgs in
 example (a b : UInt16) :
@@ -1559,7 +1570,7 @@ example (a b : UInt16) :
 /--
 info: Unable to find a counter-example
 ---
-warning: declaration uses 'sorry'
+warning: declaration uses `sorry`
 -/
 #guard_msgs in
 example (a : UInt16) :
@@ -1575,7 +1586,7 @@ example (a : UInt16) :
 /--
 info: Unable to find a counter-example
 ---
-warning: declaration uses 'sorry'
+warning: declaration uses `sorry`
 -/
 #guard_msgs in
 example (a b : UInt16) :
@@ -1587,7 +1598,7 @@ example (a b : UInt16) :
 /--
 info: Unable to find a counter-example
 ---
-warning: declaration uses 'sorry'
+warning: declaration uses `sorry`
 -/
 #guard_msgs in
 example (a b : UInt8) :
@@ -1599,7 +1610,7 @@ example (a b : UInt8) :
 /--
 info: Unable to find a counter-example
 ---
-warning: declaration uses 'sorry'
+warning: declaration uses `sorry`
 -/
 #guard_msgs in
 example (a b : UInt8) :
@@ -1613,7 +1624,7 @@ example (a b : UInt8) :
 /--
 info: Unable to find a counter-example
 ---
-warning: declaration uses 'sorry'
+warning: declaration uses `sorry`
 -/
 #guard_msgs in
 example (a b : Dtype) : Dtype.join a b == Dtype.join b a := by plausible

@@ -29,3 +29,5 @@ import TensorLib.Slice
 import TensorLib.Tensor
 import TensorLib.Test
 import TensorLib.Ufunc
+import TensorLib.MixedPrec
+import TensorLib.LOrd

@@ -123,7 +123,7 @@ def dtypeNameToNpyString (t : TensorLib.Dtype) : String := match t with
 def fromNpyString (s : String) : Err Dtype :=
   if s.length == 0 then .error "Empty dtype string" else
   do
-    let order <- ByteOrder.fromChar (s.get 0)
+    let order <- ByteOrder.fromChar s.front
     let nameStr := s.drop 1
     -- bf16 stored as "<V2" by ml_dtypes/JAX/TensorFlow (littleEndian)
     -- We only recognize "<V2" as bf16 to avoid collision with "|V2" (actual void data).
@@ -135,7 +135,7 @@ def fromNpyString (s : String) : Err Dtype :=
       -- This is a known python limitation.
       else if nameStr == "V1" && order == .littleEndian then .ok .float8_e4m3
       else if nameStr == "f1" && order == .littleEndian then .ok .float8_e5m2
-      else dtypeNameFromNpyString nameStr
+      else dtypeNameFromNpyString nameStr.toString
     return { name, order }
 
 def toNpyString (t : Dtype) : String := t.order.toChar.toString.append (dtypeNameToNpyString t.name)

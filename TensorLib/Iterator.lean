@@ -37,22 +37,19 @@ namespace Iterator
 set_option synthInstance.checkSynthOrder false
 
 instance forInInstance [Monad m] [inst : Iterator iter value] : ForIn m iter value where
-  forIn {α} [Monad m] (iter : iter) (x : α) (f : value -> α -> m (ForInStep α)) : m α := do
-    let mut iter := iter
-    let mut res := x
-    for _ in [0:inst.size iter] do
-      let n := inst.peek iter
-      match <- f n res with
-      | .yield k =>
-        res := k
-      | .done k =>
-        res := k
-        break
-      match inst.next iter with
-      | .none => break
-      | .some iter' =>
-        iter := iter'
-    return res
+  forIn {α} (i : iter) (x : α) (f : value -> α -> m (ForInStep α)) : m α :=
+    let rec loop (it : iter) (acc : α) (n : Nat) : m α :=
+      match n with
+      | 0 => pure acc
+      | n + 1 => do
+        let v := inst.peek it
+        match <- f v acc with
+        | .done k => pure k
+        | .yield k =>
+          match inst.next it with
+          | .none => pure k
+          | .some it' => loop it' k n
+    loop i x (inst.size i)
 
 def toList [Iterator iter value] (iter : iter) : List value := Id.run do
   let mut res := []

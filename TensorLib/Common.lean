@@ -54,7 +54,7 @@ open Plausible
 /--
 info: Unable to find a counter-example
 ---
-warning: declaration uses 'sorry'
+warning: declaration uses `sorry`
 -/
 #guard_msgs in
 example (x y : Nat) :
@@ -62,16 +62,16 @@ example (x y : Nat) :
   let f := x / y
   c == f || c == (f + 1) := by plausible
 
-local instance : SampleableExt (Nat × Nat) :=
-  SampleableExt.mkSelfContained do
-    let x <- SampleableExt.interpSample Nat
-    let n <- SampleableExt.interpSample Nat
+local instance : Arbitrary (Nat × Nat) where
+  arbitrary := do
+    let x <- Arbitrary.arbitrary
+    let n <- Arbitrary.arbitrary
     return (x * n, x)
 
 /--
 info: Unable to find a counter-example
 ---
-warning: declaration uses 'sorry'
+warning: declaration uses `sorry`
 -/
 #guard_msgs in
 example (xy : Nat × Nat) :

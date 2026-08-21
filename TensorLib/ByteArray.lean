@@ -155,7 +155,7 @@ private def roundTripUInt32BE (x : UInt32) : Bool := (toBEByteArray x).toUInt32B
 /--
 info: Unable to find a counter-example
 ---
-warning: declaration uses 'sorry'
+warning: declaration uses `sorry`
 -/
 #guard_msgs in
 example (x : UInt32) : roundTripUInt32LE x && roundTripUInt32BE x := by plausible
@@ -183,6 +183,7 @@ theorem _root_.ByteArray.replicateSize (n : Nat) : (ByteArray.replicate n v).siz
   rw [ByteArray.replicateSizeAux]
   unfold ByteArray.emptyWithCapacity ByteArray.size
   simp
+  rfl
 
 def _root_.ByteArray.zeros (n : Nat) : ByteArray := ByteArray.replicate n 0
 
@@ -239,15 +240,15 @@ open Plausible
 
 private local instance : Shrinkable ByteArray where
 
-private local instance : SampleableExt ByteArray :=
-  SampleableExt.mkSelfContained do
-    let data <- SampleableExt.interpSample (Array UInt8)
+private local instance : Arbitrary ByteArray where
+  arbitrary := do
+    let data <- Arbitrary.arbitrary
     return ByteArray.mk data
 
 /--
 info: Unable to find a counter-example
 ---
-warning: declaration uses 'sorry'
+warning: declaration uses `sorry`
 -/
 #guard_msgs in
 example (arr : ByteArray) :
@@ -258,7 +259,7 @@ example (arr : ByteArray) :
 /--
 info: Unable to find a counter-example
 ---
-warning: declaration uses 'sorry'
+warning: declaration uses `sorry`
 -/
 #guard_msgs in
 example (arr : ByteArray) :

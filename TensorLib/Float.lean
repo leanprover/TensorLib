@@ -108,8 +108,8 @@ def _root_.Float.ofBEByteArray! (arr : ByteArray) : Float := get! $ Float.ofBEBy
 def _root_.Float32.toNat (f : Float32) : Nat :=
   if f.isNaN then 0          -- NaN -> 0
   else if f <= 0 then 0     -- -inf and negatives -> 0
-  else if f.isPosInf then 0xFFFFFFFFFFFFFFFF
-  else f.toUInt64.toNat     -- +inf -> UINT64_MAX
+  else if f.isPosInf then 0xFFFFFFFFFFFFFFFF -- +inf -> UINT64_MAX
+  else f.toUInt64.toNat
 
 -- Returns INT64_MAX/MIN for +-inf, 0 for NaN.
 -- Per-dtype saturation (e.g. +inf goes to INT8_MAX for int8) is handled by
@@ -684,7 +684,7 @@ def _root_.UInt8.toFloat32FromFloat8E8M0 (bits: UInt8) : Float32 :=
 #guard (126 : UInt8).toFloat32FromFloat8E8M0 == 0.5 -- 2^(126-127) = 2^(-1) = 0.5
 #guard (254 : UInt8).toFloat32FromFloat8E8M0 == Float32.ofBits 0x7F000000 -- 2^127 (largest value)
 #guard (0 : UInt8).toFloat32FromFloat8E8M0 == Float32.ofBits 0x00400000 -- byte 0: 2^-127 as fp32 subnormal (0x00400000). Naïve bits<<23 would give +0.
-#guard (0xFF : UInt8).toFloat32FromFloat8E8M0.toBits == 0x7FC00000           -- byte 255 = NaN
+#guard (0xFF : UInt8).toFloat32FromFloat8E8M0.toBits == 0x7FC00000 -- byte 255 = NaN
 
 -- Decode fp8_e2m5 (P3109_8p6) to Float32
 -- Format: sign-magnitude, 8 bits total. Positive codes 0-127, negative codes 128-255.
@@ -821,7 +821,7 @@ section Test
 /--
 info: Unable to find a counter-example
 ---
-warning: declaration uses 'sorry'
+warning: declaration uses `sorry`
 -/
   #guard_msgs in
   example (bits : UInt16) :
@@ -861,7 +861,7 @@ warning: declaration uses 'sorry'
 /--
 info: Unable to find a counter-example
 ---
-warning: declaration uses 'sorry'
+warning: declaration uses `sorry`
 -/
 #guard_msgs in
   example (bits : UInt16) :
@@ -919,7 +919,7 @@ warning: declaration uses 'sorry'
 /--
 info: Unable to find a counter-example
 ---
-warning: declaration uses 'sorry'
+warning: declaration uses `sorry`
 -/
 #guard_msgs in
   example (bits : UInt8) :
@@ -932,7 +932,7 @@ warning: declaration uses 'sorry'
 /--
 info: Unable to find a counter-example
 ---
-warning: declaration uses 'sorry'
+warning: declaration uses `sorry`
 -/
 #guard_msgs in
   example (bits : UInt8) :

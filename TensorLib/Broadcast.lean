@@ -77,13 +77,10 @@ private theorem oneExtendPrefixLength (b : Broadcast) :
   b'.left.ndim = b'.right.ndim := by
   cases b
   rename_i left right
-  simp [oneExtendPrefix]
-  by_cases H : left.ndim <= right.ndim
-  . simp_all [Shape.ndim]
-  . simp_all [Shape.ndim]
-    aesop (config := { warnOnNonterminal := false })
-    rw [Nat.sub_add_cancel]
-    omega
+  simp only [oneExtendPrefix]
+  by_cases h : left.ndim <= right.ndim
+  · rw [if_pos h]; simp only [Shape.ndim] at *; simp [List.length_append, List.length_replicate]; omega
+  · rw [if_neg h]; simp only [Shape.ndim] at *; simp [List.length_append, List.length_replicate]; omega
 
 private def matchPairs (b : Broadcast) : Option Shape :=
   if b.left.ndim != b.right.ndim then none else
