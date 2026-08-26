@@ -125,7 +125,7 @@ def fromNpyString (s : String) : Err Dtype :=
   if s.length == 0 then .error "Empty dtype string" else
   do
     let order <- ByteOrder.fromChar (s.get 0)
-    let nameStr := s.drop 1
+    let nameStr := (s.drop 1).toString
     -- bf16 stored as "<V2" by ml_dtypes/JAX/TensorFlow (littleEndian)
     -- We only recognize "<V2" as bf16 to avoid collision with "|V2" (actual void data).
     -- Only littleEndian V2 is bf16. Tensor.toNpy always writes LE so this is safe.

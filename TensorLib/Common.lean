@@ -54,7 +54,7 @@ open Plausible
 /--
 info: Unable to find a counter-example
 ---
-warning: declaration uses 'sorry'
+warning: declaration uses `sorry`
 -/
 #guard_msgs in
 example (x y : Nat) :
@@ -71,7 +71,7 @@ local instance : SampleableExt (Nat × Nat) :=
 /--
 info: Unable to find a counter-example
 ---
-warning: declaration uses 'sorry'
+warning: declaration uses `sorry`
 -/
 #guard_msgs in
 example (xy : Nat × Nat) :

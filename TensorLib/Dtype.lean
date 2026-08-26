@@ -1373,7 +1373,7 @@ private def canCastLosslessIntRoundTrip (fromDtype : Dtype) (n : Int) (toDtype :
 /--
 info: Unable to find a counter-example
 ---
-warning: declaration uses 'sorry'
+warning: declaration uses `sorry`
 -/
 #guard_msgs in
 example (fromDtype toDtype : Dtype) (n : Nat) :
@@ -1384,7 +1384,7 @@ example (fromDtype toDtype : Dtype) (n : Nat) :
 /--
 info: Unable to find a counter-example
 ---
-warning: declaration uses 'sorry'
+warning: declaration uses `sorry`
 -/
 #guard_msgs in
 -- One dtype should always go back and forth
@@ -1395,7 +1395,7 @@ example (dtype : Dtype) (n : Nat) :
 /--
 info: Unable to find a counter-example
 ---
-warning: declaration uses 'sorry'
+warning: declaration uses `sorry`
 -/
 #guard_msgs in
 -- Lossless translations should be OK
@@ -1411,7 +1411,7 @@ example (fromDtype toDtype : Dtype) (n : Nat) :
 /--
 info: Unable to find a counter-example
 ---
-warning: declaration uses 'sorry'
+warning: declaration uses `sorry`
 -/
 #guard_msgs in
 example (a b : UInt16) :
@@ -1424,7 +1424,7 @@ example (a b : UInt16) :
 /--
 info: Unable to find a counter-example
 ---
-warning: declaration uses 'sorry'
+warning: declaration uses `sorry`
 -/
 #guard_msgs in
 example (a : UInt16) :
@@ -1440,7 +1440,7 @@ example (a : UInt16) :
 /--
 info: Unable to find a counter-example
 ---
-warning: declaration uses 'sorry'
+warning: declaration uses `sorry`
 -/
 #guard_msgs in
 example (a b : UInt16) :
@@ -1452,7 +1452,7 @@ example (a b : UInt16) :
 /--
 info: Unable to find a counter-example
 ---
-warning: declaration uses 'sorry'
+warning: declaration uses `sorry`
 -/
 #guard_msgs in
 example (a b : UInt8) :
@@ -1464,7 +1464,7 @@ example (a b : UInt8) :
 /--
 info: Unable to find a counter-example
 ---
-warning: declaration uses 'sorry'
+warning: declaration uses `sorry`
 -/
 #guard_msgs in
 example (a b : UInt8) :
@@ -1478,7 +1478,7 @@ example (a b : UInt8) :
 /--
 info: Unable to find a counter-example
 ---
-warning: declaration uses 'sorry'
+warning: declaration uses `sorry`
 -/
 #guard_msgs in
 example (a b : Dtype) : Dtype.join a b == Dtype.join b a := by plausible

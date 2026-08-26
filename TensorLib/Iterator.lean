@@ -37,7 +37,7 @@ namespace Iterator
 set_option synthInstance.checkSynthOrder false
 
 instance forInInstance [Monad m] [inst : Iterator iter value] : ForIn m iter value where
-  forIn {α} [Monad m] (iter : iter) (x : α) (f : value -> α -> m (ForInStep α)) : m α := do
+  forIn {α} (iter : iter) (x : α) (f : value -> α -> m (ForInStep α)) : m α := do
     let mut iter := iter
     let mut res := x
     for _ in [0:inst.size iter] do

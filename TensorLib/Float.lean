@@ -679,7 +679,7 @@ section Test
 /--
 info: Unable to find a counter-example
 ---
-warning: declaration uses 'sorry'
+warning: declaration uses `sorry`
 -/
   #guard_msgs in
   example (bits : UInt16) :
@@ -719,7 +719,7 @@ warning: declaration uses 'sorry'
 /--
 info: Unable to find a counter-example
 ---
-warning: declaration uses 'sorry'
+warning: declaration uses `sorry`
 -/
 #guard_msgs in
   example (bits : UInt16) :
@@ -777,7 +777,7 @@ warning: declaration uses 'sorry'
 /--
 info: Unable to find a counter-example
 ---
-warning: declaration uses 'sorry'
+warning: declaration uses `sorry`
 -/
 #guard_msgs in
   example (bits : UInt8) :
@@ -790,7 +790,7 @@ warning: declaration uses 'sorry'
 /--
 info: Unable to find a counter-example
 ---
-warning: declaration uses 'sorry'
+warning: declaration uses `sorry`
 -/
 #guard_msgs in
   example (bits : UInt8) :

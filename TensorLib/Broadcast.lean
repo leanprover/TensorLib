@@ -81,8 +81,8 @@ private theorem oneExtendPrefixLength (b : Broadcast) :
   by_cases H : left.ndim <= right.ndim
   . simp_all [Shape.ndim]
   . simp_all [Shape.ndim]
-    aesop (config := { warnOnNonterminal := false })
-    rw [Nat.sub_add_cancel]
+    have hn : ¬ (left.val.length ≤ right.val.length) := by omega
+    simp only [hn, ↓reduceIte, List.length_append, List.length_replicate]
     omega
 
 private def matchPairs (b : Broadcast) : Option Shape :=
