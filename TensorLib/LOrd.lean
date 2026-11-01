@@ -115,18 +115,26 @@ private lemma pack_unpack_bv (bv : BitVec 32) (h : Float.Model.Format.binary32.V
   simp only [Float.Model.Format.binary32]
   split_ifs with h1 h2 h3 h4
   · -- exponent all-ones, mantissa 0 → +/- infinity
+    -- v4.35 core: unpack* are `extractLsb'` at width `spec.exponentBits` etc.; restate at
+    -- literal widths so `bv_decide` sees them as bitvector terms rather than opaque atoms.
+    replace h1 : bv.extractLsb' 23 8 = -1#8 := h1
+    replace h2 : bv.extractLsb' 0 23 = 0#23 := h2
     simp only [Float.Model.UnpackedFloat.pack, Float.Model.UnpackedFloat.packedInfinity,
                Float.Model.UnpackedFloat.packComponents, sign_ofBitVec_toBitVec,
                Float.Model.UnpackedFloat.unpackSign, Float.Model.UnpackedFloat.unpackExponent,
                Float.Model.UnpackedFloat.unpackMantissa, Float.Model.Format.binary32] at h1 h2 ⊢
+    show (bv.extractLsb' 31 1 ++ -1#8 ++ 0#23 : BitVec 32) = bv
     bv_decide
   · -- exponent all-ones, mantissa ≠ 0 → NaN; validity forces bv = canonical NaN
     exact (h.eq_packedNaN h1 h2).symm
   · -- exponent 0, mantissa 0 → +/- zero
+    replace h3 : bv.extractLsb' 23 8 = 0#8 := h3
+    replace h4 : bv.extractLsb' 0 23 = 0#23 := h4
     simp only [Float.Model.UnpackedFloat.pack, Float.Model.UnpackedFloat.packedZero,
                Float.Model.UnpackedFloat.packComponents, sign_ofBitVec_toBitVec,
                Float.Model.UnpackedFloat.unpackSign, Float.Model.UnpackedFloat.unpackExponent,
                Float.Model.UnpackedFloat.unpackMantissa, Float.Model.Format.binary32] at h3 h4 ⊢
+    show (bv.extractLsb' 31 1 ++ 0#8 ++ 0#23 : BitVec 32) = bv
     bv_decide
   · -- exponent 0, mantissa ≠ 0 → subnormal finite (model exponent -149)
     have hm : (@Float.Model.UnpackedFloat.unpackMantissa Float.Model.Format.binary32 bv).toNat

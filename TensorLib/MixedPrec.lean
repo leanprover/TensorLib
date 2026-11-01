@@ -341,12 +341,12 @@ private lemma toModel_unpack_of_exp_ff (x : Float32)
   --   x.toBits >>> 23 &&& 0xFF = 0xFF (UInt32)
   --   ↔ x.toModel.toBits.toBitVec.extractLsb 30 23 = -1#8 (BitVec 8)
   -- This equivalence needs a lemma like UInt32.extractLsb_eq or omega after BitVec unfolding.
-  have h_exp : x.toModel.toBits.toBitVec.extractLsb 30 23 = -1#8 := by
+  have h_exp : x.toModel.toBits.toBitVec.extractLsb' 23 8 = -1#8 := by
     -- Push the UInt32 hypothesis down to a BitVec equation, then let bv_decide
     -- discharge the extractLsb claim (bits 23..30 of the 32-bit pattern are all ones).
     have hbv : (x.toBits.toBitVec >>> 23) &&& 0xFF#32 = 0xFF#32 := by
       simpa using congrArg UInt32.toBitVec hexp
-    show x.toBits.toBitVec.extractLsb 30 23 = -1#8
+    show x.toBits.toBitVec.extractLsb' 23 8 = -1#8
     bv_decide
   -- Case split on the actual unpack result; zero/finite are impossible since exp = 0xFF
   cases h_u : x.toModel.unpack with
@@ -357,7 +357,7 @@ private lemma toModel_unpack_of_exp_ff (x : Float32)
     exfalso
     simp only [Float32.Model.unpack, Float.Model.UnpackedFloat.unpack,
                Float.Model.UnpackedFloat.unpackExponent, Float.Model.Format.binary32,
-               Float32.toBits, h_exp, BitVec.cast_eq, ite_true] at h_u
+               Float32.toBits, h_exp, ite_true] at h_u
     split_ifs at h_u <;> simp at h_u
 
 -- Helper: when exp = 0xFF, x.abs.toModel.unpack is notANumber or infinity .positive.
@@ -452,7 +452,7 @@ private lemma unpack_of_exp_zero (x : Float32) (hexp : x.toBits >>> 23 &&& 0xFF 
       simpa using congrArg UInt32.toBitVec hexp
     unfold Float.Model.UnpackedFloat.unpackExponent
     simp only [Float.Model.Format.binary32]
-    show ((x.toBits.toBitVec.extractLsb 30 23).cast _ : BitVec 8) = 0#8
+    show (x.toBits.toBitVec.extractLsb' 23 8 : BitVec 8) = 0#8
     bv_decide
   -- the mantissa bitvector has toNat < 2^23 (it is a BitVec 23)
   set mv := Float.Model.UnpackedFloat.unpackMantissa (spec := Float.Model.Format.binary32)
